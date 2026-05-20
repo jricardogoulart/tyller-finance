@@ -393,4 +393,184 @@ router.post('/action-plan', authMiddleware, async (req: AuthenticatedRequest, re
   }
 });
 
+// POST /api/ai/action-plans - Salva o histórico de planos gerados
+router.post('/action-plans', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Não autorizado.' });
+  }
+
+  const { economyLevel, planContent } = req.body;
+  if (!economyLevel || !['leve', 'moderado', 'intenso'].includes(economyLevel)) {
+    return res.status(400).json({ error: 'Nível de economia inválido.' });
+  }
+  if (!planContent) {
+    return res.status(400).json({ error: 'Conteúdo do plano é obrigatório.' });
+  }
+
+  try {
+    // 1. Obter workspace do usuário
+    const workspaceResult = await pool.query(
+      'SELECT id FROM workspaces WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+
+    if (workspaceResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Workspace não encontrado.' });
+    }
+
+    const workspaceId = workspaceResult.rows[0].id;
+
+    // 2. Buscar average_spend em ia_context_maps
+    const mapResult = await pool.query(
+      'SELECT average_spend FROM ia_context_maps WHERE workspace_id = $1 LIMIT 1',
+      [workspaceId]
+    );
+    const averageSpend = mapResult.rows.length > 0 ? parseFloat(mapResult.rows[0].average_spend) : 0;
+
+    // 3. Calcular target_saving baseado no economyLevel
+    let economyFactor = 0.0;
+    if (economyLevel === 'leve') economyFactor = 0.10;
+    else if (economyLevel === 'moderado') economyFactor = 0.25;
+    else if (economyLevel === 'intenso') economyFactor = 0.50;
+
+    const targetSaving = Number((averageSpend * economyFactor).toFixed(2));
+
+    // 4. Inserir o plano na tabela action_plans
+    const insertResult = await pool.query(
+      `INSERT INTO action_plans (workspace_id, economy_level, plan_content, target_saving, actual_saving, adherence_score)
+       VALUES ($1, $2, $3, $4, NULL, NULL)
+       RETURNING *`,
+      [workspaceId, economyLevel, planContent, targetSaving]
+    );
+
+    return res.status(201).json(insertResult.rows[0]);
+  } catch (error) {
+    console.error('[TyllerFinance Backend] Error in POST /api/ai/action-plans:', error);
+    return res.status(500).json({ error: 'Erro ao salvar plano de ação.' });
+  }
+});
+
+// GET /api/ai/action-plans/history - Retorna histórico com cálculos dinâmicos de aderência e breakdown por categoria
+router.get('/action-plans/history', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Não autorizado.' });
+  }
+
+  try {
+    // 1. Obter workspace do usuário
+    const workspaceResult = await pool.query(
+      'SELECT id FROM workspaces WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+
+    if (workspaceResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Workspace não encontrado.' });
+    }
+
+    const workspaceId = workspaceResult.rows[0].id;
+
+    // 2. Buscar average_spend ativo
+    const mapResult = await pool.query(
+      'SELECT average_spend FROM ia_context_maps WHERE workspace_id = $1 LIMIT 1',
+      [workspaceId]
+    );
+    const averageSpend = mapResult.rows.length > 0 ? parseFloat(mapResult.rows[0].average_spend) : 0;
+
+    // 3. Buscar todos os planos da tabela action_plans
+    const plansResult = await pool.query(
+      'SELECT id, workspace_id, economy_level, plan_content, created_at, target_saving FROM action_plans WHERE workspace_id = $1 ORDER BY created_at DESC',
+      [workspaceId]
+    );
+    const plans = plansResult.rows;
+
+    const populatedPlans = [];
+
+    for (const plan of plans) {
+      // 4. Calcular dias decorridos
+      const daysElapsed = Math.max(
+        1,
+        Math.min(
+          30,
+          Math.ceil((Date.now() - new Date(plan.created_at).getTime()) / (1000 * 60 * 60 * 24))
+        )
+      );
+
+      const createdDate = new Date(plan.created_at);
+      const vigencyEnd = new Date(createdDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const today = new Date();
+      const periodEnd = vigencyEnd < today ? vigencyEnd : today;
+
+      let actualSaving = 0;
+      let adherenceScore = 0;
+      let categoryPercentages: Array<{ category: string; percentage: number }> = [];
+
+      if (averageSpend === 0) {
+        actualSaving = 0;
+        adherenceScore = 100.00;
+      } else {
+        // Buscar soma das despesas reais no período de vigência (amount < 0)
+        const spentResult = await pool.query(
+          `SELECT SUM(ABS(amount)) as total_spent FROM transactions 
+           WHERE workspace_id = $1 AND date >= $2 AND date <= $3 AND amount < 0`,
+          [workspaceId, createdDate, periodEnd]
+        );
+        const totalSpent = parseFloat(spentResult.rows[0].total_spent) || 0;
+
+        // Proporcionalizadores
+        const proportionalAverageSpend = (averageSpend / 30) * daysElapsed;
+        const proportionalTargetSaving = (parseFloat(plan.target_saving) / 30) * daysElapsed;
+
+        actualSaving = proportionalAverageSpend - totalSpent;
+
+        if (actualSaving <= 0) {
+          adherenceScore = 0;
+        } else {
+          adherenceScore = proportionalTargetSaving > 0 
+            ? Math.min(100.00, (actualSaving / proportionalTargetSaving) * 100) 
+            : 100.00;
+        }
+
+        // Buscar distribuição percentual por categoria no período
+        const categoryResult = await pool.query(
+          `SELECT category, SUM(ABS(amount)) as category_spent FROM transactions 
+           WHERE workspace_id = $1 AND date >= $2 AND date <= $3 AND amount < 0
+           GROUP BY category`,
+          [workspaceId, createdDate, periodEnd]
+        );
+
+        categoryPercentages = categoryResult.rows.map(row => {
+          const categorySpent = parseFloat(row.category_spent) || 0;
+          const percentage = totalSpent > 0 ? (categorySpent / totalSpent) * 100 : 0;
+          return {
+            category: row.category || 'Não Categorizado',
+            percentage: Number(percentage.toFixed(2))
+          };
+        });
+      }
+
+      const actualSavingFormatted = Number(actualSaving.toFixed(2));
+      const adherenceScoreFormatted = Number(adherenceScore.toFixed(2));
+
+      // 5. Atualizar no Postgres de forma persistente
+      await pool.query(
+        'UPDATE action_plans SET actual_saving = $1, adherence_score = $2 WHERE id = $3',
+        [actualSavingFormatted, adherenceScoreFormatted, plan.id]
+      );
+
+      populatedPlans.push({
+        ...plan,
+        target_saving: parseFloat(plan.target_saving) || 0,
+        actual_saving: actualSavingFormatted,
+        adherence_score: adherenceScoreFormatted,
+        category_percentages: categoryPercentages
+      });
+    }
+
+    return res.status(200).json(populatedPlans);
+  } catch (error) {
+    console.error('[TyllerFinance Backend] Error in GET /api/ai/action-plans/history:', error);
+    return res.status(500).json({ error: 'Erro ao buscar o histórico de planos.' });
+  }
+});
+
 export default router;
