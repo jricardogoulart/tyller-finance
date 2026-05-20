@@ -41,4 +41,12 @@ export const updateRule = async (id: string, data: { search_token: string; categ
   return api.put(`/rules/${id}`, data);
 };
 
+export const fetchActionPlansHistory = async () => {
+  return api.get('/ai/action-plans/history');
+};
+
+export const saveActionPlan = async (data: { economyLevel: string; planContent: string }) => {
+  return api.post('/ai/action-plans', data);
+};
+
 export default api;
