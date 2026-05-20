@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { pool } from '../db';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
+import { sanitizeMemo } from '../utils/TransactionClassifier';
 
 const router = Router();
 
@@ -63,6 +64,11 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
     const workspaceId = workspaceResult.rows[0].id;
 
+    const sanitizedToken = sanitizeMemo(search_token);
+    if (!sanitizedToken) {
+      return res.status(400).json({ error: 'Termo de busca inválido após limpeza.' });
+    }
+
     const priority = 10;
     const type = transaction_type || 'ANY';
     const ruleOrigin = origin || 'MANUAL';
@@ -76,12 +82,12 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
        ON CONFLICT (workspace_id, search_token) 
        DO UPDATE SET category = EXCLUDED.category, origin = EXCLUDED.origin
        RETURNING id, search_token, category, origin`,
-      [workspaceId, search_token.toUpperCase().trim(), category, priority, type, ruleOrigin, ruleOrigin]
+      [workspaceId, sanitizedToken, category, priority, type, ruleOrigin, ruleOrigin]
     );
 
     // Efeito Cascata (Recorrência Instantânea)
     // Atualiza TODOS os lançamentos correspondentes neste workspace para alinhar com a nova diretriz de categoria
-    const searchPattern = `%${search_token.toUpperCase().trim()}%`;
+    const searchPattern = `%${sanitizedToken}%`;
     await client.query(
       `UPDATE transactions 
        SET category = $1 
@@ -92,7 +98,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
     await client.query('COMMIT');
 
-    const rule = result.rows[0] || { search_token, category, origin: ruleOrigin };
+    const rule = result.rows[0] || { search_token: sanitizedToken, category, origin: ruleOrigin };
 
     return res.status(201).json({
       message: 'Regra criada e cascata executada com sucesso.',
@@ -207,12 +213,17 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     const ruleId = req.params.id;
     const type = transaction_type || 'ANY';
 
+    const sanitizedToken = sanitizeMemo(search_token);
+    if (!sanitizedToken) {
+      return res.status(400).json({ error: 'Termo de busca inválido após limpeza.' });
+    }
+
     await client.query('BEGIN');
 
     // Verificar se já existe OUTRA regra com o mesmo termo neste workspace para evitar violar o constraint único
     const duplicateCheck = await client.query(
       'SELECT id FROM transaction_rules WHERE workspace_id = $1 AND search_token = $2 AND id != $3 LIMIT 1',
-      [workspaceId, search_token.toUpperCase().trim(), ruleId]
+      [workspaceId, sanitizedToken, ruleId]
     );
 
     if (duplicateCheck.rows.length > 0) {
@@ -225,7 +236,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
        SET search_token = $1, category = $2, transaction_type = $3, origin = 'MANUAL'
        WHERE id = $4 AND workspace_id = $5 
        RETURNING id, search_token, category, origin`,
-      [search_token.toUpperCase().trim(), category, type, ruleId, workspaceId]
+      [sanitizedToken, category, type, ruleId, workspaceId]
     );
 
     if (result.rows.length === 0) {
@@ -234,7 +245,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     }
 
     // Efeito Cascata on edit: atualiza todos os lançamentos que contêm este termo no memo/descrição
-    const searchPattern = `%${search_token.toUpperCase().trim()}%`;
+    const searchPattern = `%${sanitizedToken}%`;
     await client.query(
       `UPDATE transactions 
        SET category = $1 

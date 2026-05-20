@@ -161,7 +161,8 @@ export function classifyTransaction(tx: RawTransaction, userRules: Classificatio
       continue;
     }
 
-    if (cleanMemo.includes(rule.search_token)) {
+    const cleanToken = sanitizeMemo(rule.search_token);
+    if (cleanToken && cleanMemo.includes(cleanToken)) {
       return {
         original_memo: tx.memo,
         clean_memo: cleanMemo,
@@ -181,8 +182,8 @@ export function classifyTransaction(tx: RawTransaction, userRules: Classificatio
       continue;
     }
 
-    const token = rule.search_token;
-    if (token.length < 4) {
+    const token = sanitizeMemo(rule.search_token);
+    if (!token || token.length < 4) {
       continue;
     }
 
