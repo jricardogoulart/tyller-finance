@@ -141,6 +141,20 @@ export async function initDb() {
       );
     `);
 
+    // Create action_plans table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS action_plans (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        economy_level VARCHAR(20) NOT NULL CHECK (economy_level IN ('leve', 'moderado', 'intenso')),
+        plan_content TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        target_saving NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+        actual_saving NUMERIC(15,2) DEFAULT NULL,
+        adherence_score NUMERIC(5,2) DEFAULT NULL
+      );
+    `);
+
     console.log('PostgreSQL database schema initialized successfully.');
   } catch (error) {
     console.error('Error initializing database schema:', error);
