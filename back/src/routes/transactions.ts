@@ -42,6 +42,9 @@ router.post('/parse', authMiddleware, upload.single('file'), async (req: Authent
   const { originalname, buffer } = req.file;
   const extension = originalname.split('.').pop()?.toLowerCase();
 
+  // Calculate SHA-256 hash of file content for duplicate detection
+  const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
   try {
     const workspaceResult = await pool.query(
       'SELECT id FROM workspaces WHERE user_id = $1 LIMIT 1',
@@ -52,6 +55,20 @@ router.post('/parse', authMiddleware, upload.single('file'), async (req: Authent
       return res.status(400).json({ error: 'Workspace não encontrado.' });
     }
     const workspaceId = workspaceResult.rows[0].id;
+
+    // Check for duplicate file hash
+    const duplicateCheck = await pool.query(
+      'SELECT filename FROM file_uploads WHERE workspace_id = $1 AND file_hash = $2 LIMIT 1',
+      [workspaceId, fileHash]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      return res.status(200).json({
+        duplicate: true,
+        filename: duplicateCheck.rows[0].filename,
+        message: 'Este extrato já foi importado anteriormente.'
+      });
+    }
 
     const rulesResult = await pool.query(
       'SELECT id, search_token, category, subcategory, priority, transaction_type FROM transaction_rules WHERE workspace_id = $1',
@@ -205,7 +222,10 @@ router.post('/parse', authMiddleware, upload.single('file'), async (req: Authent
       };
     });
 
-    return res.status(200).json({ transactions: responseTransactions });
+    return res.status(200).json({
+      transactions: responseTransactions,
+      fileHash: fileHash
+    });
   } catch (error: any) {
     console.error('Error parsing file:', error);
     return res.status(500).json({ error: 'Erro ao processar o arquivo. Verifique o formato.' });
@@ -214,10 +234,14 @@ router.post('/parse', authMiddleware, upload.single('file'), async (req: Authent
 
 // POST /api/transactions/import
 router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
-  const { transactions, filename } = req.body;
+  const { transactions, filename, fileHash } = req.body;
 
   if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
     return res.status(400).json({ error: 'Nenhuma transação enviada para importação.' });
+  }
+
+  if (!fileHash || typeof fileHash !== 'string' || fileHash.length !== 64) {
+    return res.status(400).json({ error: 'Hash do arquivo é obrigatório e deve ter 64 caracteres.' });
   }
 
   if (!req.user) {
@@ -240,6 +264,16 @@ router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Re
 
     await client.query('BEGIN');
 
+    // Save file upload record with hash first to get uploadId
+    const cleanFilename = (filename || 'extrato.ofx').trim();
+    const uploadResult = await client.query(
+      `INSERT INTO file_uploads (workspace_id, filename, transaction_count, status, file_hash)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [workspaceId, cleanFilename, transactions.length, 'success', fileHash]
+    );
+    const uploadId = uploadResult.rows[0].id;
+
     let insertedCount = 0;
 
     for (const tx of transactions) {
@@ -248,11 +282,11 @@ router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Re
       const hash = crypto.createHash('sha256').update(hashInput).digest('hex');
 
       const result = await client.query(
-        `INSERT INTO transactions (workspace_id, description, amount, date, transaction_hash, category, original_memo, clean_memo, suggested_identifier)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO transactions (workspace_id, description, amount, date, transaction_hash, category, original_memo, clean_memo, suggested_identifier, file_upload_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (workspace_id, transaction_hash) DO NOTHING
          RETURNING id`,
-        [workspaceId, tx.description.trim(), tx.amount, tx.date, hash, tx.category, tx.original_memo, tx.clean_memo, tx.suggested_identifier]
+        [workspaceId, tx.description.trim(), tx.amount, tx.date, hash, tx.category, tx.original_memo, tx.clean_memo, tx.suggested_identifier, uploadId]
       );
 
       if (result.rows.length > 0) {
@@ -260,13 +294,13 @@ router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Re
       }
     }
 
-    // Save file upload record
-    const cleanFilename = (filename || 'extrato.ofx').trim();
-    await client.query(
-      `INSERT INTO file_uploads (workspace_id, filename, transaction_count, status)
-       VALUES ($1, $2, $3, $4)`,
-      [workspaceId, cleanFilename, insertedCount, 'success']
-    );
+    // Update transaction_count with actual inserted count if different
+    if (insertedCount !== transactions.length) {
+      await client.query(
+        `UPDATE file_uploads SET transaction_count = $1 WHERE id = $2`,
+        [insertedCount, uploadId]
+      );
+    }
 
     await client.query('COMMIT');
 
