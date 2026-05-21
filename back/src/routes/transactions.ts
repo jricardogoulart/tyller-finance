@@ -378,4 +378,75 @@ router.get('/uploads/history', authMiddleware, async (req: AuthenticatedRequest,
   }
 });
 
+// DELETE /api/transactions/uploads/:id - Remove extrato e transações associadas
+router.delete('/uploads/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
+  const { id } = req.params;
+
+  if (!req.user) {
+    return res.status(401).json({ error: 'Não autorizado.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    // 1. Verificar se o upload pertence ao workspace do usuário
+    const workspaceResult = await client.query(
+      'SELECT id FROM workspaces WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+
+    if (workspaceResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Workspace não encontrado.' });
+    }
+
+    const workspaceId = workspaceResult.rows[0].id;
+
+    // 2. Verificar se o upload existe e pertence ao workspace
+    const uploadCheck = await client.query(
+      'SELECT id, filename FROM file_uploads WHERE id = $1 AND workspace_id = $2',
+      [id, workspaceId]
+    );
+
+    if (uploadCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Extrato não encontrado ou sem permissão.' });
+    }
+
+    const filename = uploadCheck.rows[0].filename;
+
+    await client.query('BEGIN');
+
+    // 3. Contar transações que serão removidas
+    const countResult = await client.query(
+      'SELECT COUNT(*) as count FROM transactions WHERE file_upload_id = $1',
+      [id]
+    );
+    const transactionsCount = parseInt(countResult.rows[0].count) || 0;
+
+    // 4. Deletar transações associadas (explícito, mesmo com CASCADE)
+    await client.query(
+      'DELETE FROM transactions WHERE file_upload_id = $1',
+      [id]
+    );
+
+    // 5. Deletar o registro de file_upload
+    await client.query(
+      'DELETE FROM file_uploads WHERE id = $1',
+      [id]
+    );
+
+    await client.query('COMMIT');
+
+    return res.status(200).json({
+      message: 'Extrato excluído com sucesso.',
+      filename: filename,
+      deletedTransactions: transactionsCount
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting upload:', error);
+    return res.status(500).json({ error: 'Erro ao excluir o extrato.' });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;
