@@ -49,4 +49,11 @@ export const saveActionPlan = async (data: { economyLevel: string; planContent: 
   return api.post('/ai/action-plans', data);
 };
 
+export const deleteUpload = async (
+  uploadId: string
+): Promise<{ message: string; filename: string; deletedTransactions: number }> => {
+  const response = await api.delete(`/transactions/uploads/${uploadId}`);
+  return response.data;
+};
+
 export default api;

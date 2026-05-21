@@ -43,6 +43,18 @@ export function UploadCard({ onParsed, onError, className = "" }: UploadCardProp
         },
       });
 
+      if (response.data?.duplicate) {
+        const confirmImport = window.confirm(
+          `⚠️ Extrato Duplicado Detectado\n\n` +
+            `Este extrato parece idêntico ao arquivo "${response.data.filename}" enviado anteriormente.\n\n` +
+            `Deseja importar mesmo assim?\n\n` +
+            `Clique "OK" para importar ou "Cancelar" para descartar.`
+        );
+        if (!confirmImport) {
+          return;
+        }
+      }
+
       if (response.data?.transactions) {
         onParsed(response.data.transactions);
       }
