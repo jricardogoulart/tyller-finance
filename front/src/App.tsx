@@ -500,6 +500,8 @@ function MainLayout() {
     category: string;
   } | null>(null);
   const [parsedTransactions, setParsedTransactions] = useState<any[]>([]);
+  const [pendingFileHash, setPendingFileHash] = useState('');
+  const [pendingFilename, setPendingFilename] = useState('');
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -619,8 +621,10 @@ function MainLayout() {
     }
   }, [user, dashboardTab]);
 
-  const handleParsed = (extracted: any[]) => {
-    setParsedTransactions(extracted);
+  const handleParsed = (data: { transactions: any[]; fileHash: string; filename: string }) => {
+    setParsedTransactions(data.transactions);
+    setPendingFileHash(data.fileHash);
+    setPendingFilename(data.filename);
     setUploadError('');
     setSuccessMessage('');
   };
@@ -631,6 +635,8 @@ function MainLayout() {
     const needsAutoAI = total > 0 && (outrosCount / total) > 0.8;
 
     setParsedTransactions([]);
+    setPendingFileHash('');
+    setPendingFilename('');
     setSuccessMessage(
       `Importação concluída! ${importedCount} transações adicionadas.` +
       (skippedCount > 0 ? ` (${skippedCount} duplicadas ignoradas).` : '')
@@ -657,6 +663,8 @@ function MainLayout() {
 
   const handleCancelReview = () => {
     setParsedTransactions([]);
+    setPendingFileHash('');
+    setPendingFilename('');
     setUploadError('');
   };
 
@@ -908,6 +916,8 @@ function MainLayout() {
                     {parsedTransactions.length > 0 ? (
                       <ReviewList
                         transactions={parsedTransactions}
+                        fileHash={pendingFileHash}
+                        filename={pendingFilename}
                         onConfirm={handleConfirmImport}
                         onCancel={handleCancelReview}
                       />

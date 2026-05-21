@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../utils/api';
 
 interface UploadCardProps {
-  onParsed: (transactions: any[]) => void;
+  onParsed: (data: { transactions: any[]; fileHash: string; filename: string }) => void;
   onError: (error: string) => void;
   className?: string;
 }
@@ -55,8 +55,12 @@ export function UploadCard({ onParsed, onError, className = "" }: UploadCardProp
         }
       }
 
-      if (response.data?.transactions) {
-        onParsed(response.data.transactions);
+      if (response.data?.transactions && response.data?.fileHash) {
+        onParsed({
+          transactions: response.data.transactions,
+          fileHash: response.data.fileHash,
+          filename: file.name,
+        });
       }
     } catch (err: any) {
       console.error(err);

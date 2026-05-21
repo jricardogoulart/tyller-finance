@@ -12,11 +12,19 @@ interface TransactionItem {
 
 interface ReviewListProps {
   transactions: TransactionItem[];
+  fileHash: string;
+  filename: string;
   onConfirm: (importedCount: number, skippedCount: number) => void;
   onCancel: () => void;
 }
 
-export function ReviewList({ transactions: initialTransactions, onConfirm, onCancel }: ReviewListProps) {
+export function ReviewList({
+  transactions: initialTransactions,
+  fileHash,
+  filename,
+  onConfirm,
+  onCancel,
+}: ReviewListProps) {
   const [items, setItems] = useState<Array<TransactionItem & { selected: boolean }>>(
     initialTransactions.map(tx => ({ ...tx, selected: true }))
   );
@@ -77,7 +85,11 @@ export function ReviewList({ transactions: initialTransactions, onConfirm, onCan
     setError('');
 
     try {
-      const response = await api.post('/transactions/import', { transactions: payload });
+      const response = await api.post('/transactions/import', {
+        transactions: payload,
+        filename,
+        fileHash,
+      });
       if (response.status === 200) {
         onConfirm(response.data.importedCount, response.data.skippedCount);
       }
