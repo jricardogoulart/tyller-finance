@@ -1,3 +1,95 @@
+export const VALID_CATEGORIES = [
+  'Moradia',
+  'Alimentação',
+  'Transporte',
+  'Saúde',
+  'Lazer',
+  'Educação',
+  'Serviços',
+  'Receita',
+  'Seguro',
+  'Outros',
+] as const;
+
+const CATEGORY_ALIASES: Record<string, string> = {
+  ALIMENTACAO: 'Alimentação',
+  TRANSPORTE: 'Transporte',
+  MORADIA: 'Moradia',
+  SAUDE: 'Saúde',
+  LAZER: 'Lazer',
+  EDUCACAO: 'Educação',
+  SERVICOS: 'Serviços',
+  RECEITA: 'Receita',
+  SEGURO: 'Seguro',
+  OUTROS: 'Outros',
+  TRABALHO: 'Serviços',
+};
+
+export function normalizeCategory(category: string | undefined | null): string {
+  if (!category) return 'Outros';
+  const trimmed = category.trim();
+  if ((VALID_CATEGORIES as readonly string[]).includes(trimmed)) return trimmed;
+
+  const folded = trimmed
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+
+  if (CATEGORY_ALIASES[folded]) return CATEGORY_ALIASES[folded];
+
+  const match = VALID_CATEGORIES.find(
+    (c) =>
+      c
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase() === folded
+  );
+  return match || 'Outros';
+}
+
+export function needsAICategorization(category?: string | null): boolean {
+  if (!category) return true;
+  return ['Outros', 'PENDENTE_CLASSIFICACAO', 'Não Categorizado', ''].includes(category);
+}
+
+const KNOWN_CATEGORY_FILTER = `category NOT IN ('Outros', 'PENDENTE_CLASSIFICACAO', 'Não Categorizado', '') AND category IS NOT NULL`;
+
+/**
+ * Busca categoria mais frequente já usada no workspace para o mesmo memo/identificador.
+ */
+export async function lookupHistoricalCategory(
+  pool: { query: (sql: string, params: unknown[]) => Promise<{ rows: Array<{ category: string }> }> },
+  workspaceId: string,
+  cleanMemo: string,
+  suggestedIdentifier?: string
+): Promise<string | null> {
+  if (!cleanMemo && !suggestedIdentifier) return null;
+
+  const byMemo = await pool.query(
+    `SELECT category, COUNT(*)::int AS cnt FROM transactions
+     WHERE workspace_id = $1 AND clean_memo = $2 AND ${KNOWN_CATEGORY_FILTER}
+     GROUP BY category ORDER BY cnt DESC LIMIT 1`,
+    [workspaceId, cleanMemo]
+  );
+  if (byMemo.rows[0]?.category) {
+    return normalizeCategory(byMemo.rows[0].category);
+  }
+
+  if (suggestedIdentifier) {
+    const byToken = await pool.query(
+      `SELECT category, COUNT(*)::int AS cnt FROM transactions
+       WHERE workspace_id = $1 AND suggested_identifier = $2 AND ${KNOWN_CATEGORY_FILTER}
+       GROUP BY category ORDER BY cnt DESC LIMIT 1`,
+      [workspaceId, suggestedIdentifier]
+    );
+    if (byToken.rows[0]?.category) {
+      return normalizeCategory(byToken.rows[0].category);
+    }
+  }
+
+  return null;
+}
+
 export type TransactionType = 'DEBIT' | 'CREDIT' | 'ANY';
 
 export interface ClassificationRule {
@@ -31,7 +123,7 @@ const rulesDb: ClassificationRule[] = [
   {
     id: 'rule_1',
     search_token: 'IFOOD',
-    category: 'ALIMENTACAO',
+    category: 'Alimentação',
     subcategory: 'DELIVERY',
     priority: 10,
     transaction_type: 'DEBIT',
@@ -39,7 +131,7 @@ const rulesDb: ClassificationRule[] = [
   {
     id: 'rule_2',
     search_token: 'UBER',
-    category: 'TRANSPORTE',
+    category: 'Transporte',
     subcategory: 'APLICATIVO',
     priority: 10,
     transaction_type: 'DEBIT',
@@ -47,7 +139,7 @@ const rulesDb: ClassificationRule[] = [
   {
     id: 'rule_3',
     search_token: 'POSTO',
-    category: 'TRANSPORTE',
+    category: 'Transporte',
     subcategory: 'COMBUSTIVEL',
     priority: 20,
     transaction_type: 'DEBIT',
@@ -55,7 +147,7 @@ const rulesDb: ClassificationRule[] = [
   {
     id: 'rule_4',
     search_token: 'AMAZON WEB SERVICES',
-    category: 'TRABALHO',
+    category: 'Serviços',
     subcategory: 'INFRAESTRUTURA',
     priority: 10,
     transaction_type: 'DEBIT',
@@ -63,7 +155,7 @@ const rulesDb: ClassificationRule[] = [
   {
     id: 'rule_5',
     search_token: 'AWS',
-    category: 'TRABALHO',
+    category: 'Serviços',
     subcategory: 'INFRAESTRUTURA',
     priority: 15,
     transaction_type: 'DEBIT',
@@ -71,7 +163,7 @@ const rulesDb: ClassificationRule[] = [
   {
     id: 'rule_6',
     search_token: 'ALURA',
-    category: 'EDUCACAO',
+    category: 'Educação',
     subcategory: 'CURSOS',
     priority: 10,
     transaction_type: 'ANY',
@@ -107,48 +199,140 @@ export function calculateSimilarity(s1: string, s2: string): number {
   return 1.0 - distance / Math.max(len1, len2);
 }
 
-export function sanitizeMemo(rawMemo: string): string {
-  let clean = rawMemo;
+/** Prefixos operacionais de extrato — não são o nome do estabelecimento/instituição. */
+const MEMO_OPERATION_PREFIXES = new Set([
+  'PAGAMENTO',
+  'PAGTO',
+  'COMPRA',
+  'DEBITO',
+  'CREDITO',
+  'TRANSFERENCIA',
+  'TRANSF',
+  'ENVIO',
+  'RECEBIDO',
+  'RECEBIMENTO',
+  'TARIFA',
+  'SAQUE',
+  'DOC',
+  'AUT',
+  'TEF',
+]);
 
-  // 1. Remover Acentos e converter para UPPERCASE
-  clean = clean.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+/**
+ * Remove apenas documentos e identificadores sensíveis (LGPD-02 / Fase 14).
+ * Preserva nomes de pessoas, estabelecimentos e instituições para regras do usuário (Fase 11).
+ */
+const CNPJ_PATTERN = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g;
 
-  // 2. Remover Datas no formato DD/MM ou MM/DD
-  clean = clean.replace(/\b\d{2}\/\d{2}\b/g, ' ');
+/** Preserva CNPJ (público) enquanto remove outros identificadores numéricos longos. */
+function maskCnpjTokens(text: string): { text: string; tokens: string[] } {
+  const tokens: string[] = [];
+  const masked = text.replace(CNPJ_PATTERN, (match) => {
+    const id = tokens.length;
+    tokens.push(match);
+    return `__CNPJ_${id}__`;
+  });
+  return { text: masked, tokens };
+}
 
-  // 3. Remover Parcelas (ex: 01/03, 1V, PARC 2)
-  clean = clean.replace(/\b\d{1,2}\/\d{1,2}\b/g, ' '); 
-  clean = clean.replace(/\b\d{1,2}V\b/g, ' ');
-  clean = clean.replace(/\bPARC(ELA)?\s*\d+\b/g, ' ');
+function restoreCnpjTokens(text: string, tokens: string[]): string {
+  let restored = text;
+  tokens.forEach((cnpj, id) => {
+    restored = restored.replace(`__CNPJ_${id}__`, cnpj);
+  });
+  return restored;
+}
 
-  // 4. Remover prefixos bancários comuns e lixo numérico acoplado
-  clean = clean.replace(/\b(AUT|DOC|TED|PIX|TEF)[:\-]?\s*\d+\b/g, ' ');
+/**
+ * Remove documentos pessoais (CPF, e-mail, telefone) e ruído bancário numérico.
+ * CNPJ permanece. Nomes em PIX/TED/descrição são preservados (Fase 11 + LGPD-02).
+ */
+export function stripSensitiveDocuments(rawMemo: string): string {
+  if (!rawMemo) return '';
 
-  // 5. Remover sequências numéricas longas (maior que 4 dígitos)
+  const { text: withCnpjMask, tokens: cnpjTokens } = maskCnpjTokens(rawMemo);
+  let clean = withCnpjMask;
+
+  clean = clean.replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, ' ');
+  clean = clean.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, ' ');
+  clean = clean.replace(/\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?\d{4,5}-?\d{4}\b/g, ' ');
+
+  clean = clean.replace(/\b\d{2}\/\d{2}(?:\/\d{4})?\b/g, ' ');
+  clean = clean.replace(/\b\d{1,2}V\b/gi, ' ');
+  clean = clean.replace(/\bPARC(ELA)?\s*\d+\b/gi, ' ');
+
+  clean = clean.replace(/\b(AUT|DOC|TED|PIX|TEF)[:\-]?\s*\d+\b/gi, ' ');
   clean = clean.replace(/\b\d{5,}\b/g, ' ');
 
-  // 6. Remover sufixos societários comuns (LTDA, ME, S/A, SA, EIRELI)
-  clean = clean.replace(/\b(LTDA|EIRELI|S\/?A|M\/?E)\b/g, ' ');
+  clean = restoreCnpjTokens(clean, cnpjTokens);
+  return clean.replace(/\s{2,}/g, ' ').trim();
+}
 
-  // 7. Remover sufixos de localidade/adquirente residuais comuns no final de strings isoladas
-  clean = clean.replace(/\b(SAO PAULO|RIO DE JANEI|SP|RJ|BR|DE)\b\s*$/g, ' ');
+/**
+ * Normaliza memo para matching de regras: tira documentos, mantém nomes/instituições.
+ */
+export function sanitizeMemo(rawMemo: string): string {
+  let clean = stripSensitiveDocuments(rawMemo);
 
-  // 8. Remover caracteres especiais (mantendo apenas alfanuméricos e espaços)
+  clean = clean.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
   clean = clean.replace(/[^A-Z0-9\s]/g, ' ');
-
-  // 9. Limpar espaços extras
   clean = clean.replace(/\s{2,}/g, ' ').trim();
 
   return clean;
 }
 
 export function getSuggestedIdentifier(cleanMemo: string): string {
-  const words = cleanMemo.split(' ').filter(w => w.length > 0);
-  if (words.length <= 2) {
-    return cleanMemo;
+  const words = cleanMemo.split(' ').filter((w) => w.length > 0);
+  if (words.length === 0) return cleanMemo;
+
+  let start = 0;
+  while (start < words.length && MEMO_OPERATION_PREFIXES.has(words[start])) {
+    start += 1;
   }
-  // Pega as duas primeiras palavras significativas para formar a sugestão inteligente
-  return words.slice(0, 2).join(' ');
+
+  const significant = words.slice(start).filter((w) => w.length >= 2);
+  if (significant.length === 0) {
+    return words.slice(0, Math.min(3, words.length)).join(' ');
+  }
+  if (significant.length <= 4) {
+    return significant.join(' ');
+  }
+  return significant.slice(0, 4).join(' ');
+}
+
+/** Rótulo seguro para UI/API: sem original_memo/CPF, com nome da instituição preservado. */
+export function getPublicDescription(row: {
+  description?: string | null;
+  clean_memo?: string | null;
+  suggested_identifier?: string | null;
+}): string {
+  const clean = row.clean_memo?.trim();
+  if (clean) return clean;
+
+  const desc = row.description?.trim();
+  if (desc) {
+    const stripped = stripSensitiveDocuments(desc);
+    if (stripped) return sanitizeMemo(stripped) || stripped;
+  }
+
+  return row.suggested_identifier?.trim() || '';
+}
+
+/** Remove original_memo e normaliza description para consumo do frontend. */
+export function toPublicTransactionRow<T extends Record<string, unknown>>(row: T) {
+  const { original_memo: _omitted, ...rest } = row;
+  const publicDescription = getPublicDescription(row as {
+    description?: string | null;
+    clean_memo?: string | null;
+    suggested_identifier?: string | null;
+  });
+
+  return {
+    ...rest,
+    description: publicDescription,
+    clean_memo: (row.clean_memo as string | undefined) ?? publicDescription,
+    suggested_identifier: row.suggested_identifier ?? getSuggestedIdentifier(publicDescription),
+  };
 }
 
 export function classifyTransaction(tx: RawTransaction, userRules: ClassificationRule[] = []): ClassifiedTransaction {
@@ -163,15 +347,7 @@ export function classifyTransaction(tx: RawTransaction, userRules: Classificatio
 
     const cleanToken = sanitizeMemo(rule.search_token);
     if (cleanToken && cleanMemo.includes(cleanToken)) {
-      return {
-        original_memo: tx.memo,
-        clean_memo: cleanMemo,
-        amount: tx.amount,
-        type: tx.type,
-        category: rule.category,
-        subcategory: rule.subcategory,
-        rule_applied: rule.id,
-      };
+      return buildClassified(tx, cleanMemo, normalizeCategory(rule.category), rule.subcategory, rule.id);
     }
   }
 
@@ -190,41 +366,93 @@ export function classifyTransaction(tx: RawTransaction, userRules: Classificatio
     // 1. Similaridade direta
     let sim = calculateSimilarity(cleanMemo, token);
     if (sim >= 0.85) {
-      return {
-        original_memo: tx.memo,
-        clean_memo: cleanMemo,
-        amount: tx.amount,
-        type: tx.type,
-        category: rule.category,
-        subcategory: rule.subcategory,
-        rule_applied: rule.id,
-      };
+      return buildClassified(tx, cleanMemo, normalizeCategory(rule.category), rule.subcategory, rule.id);
     }
 
     // 2. Similaridade parcial de palavra
     const words = cleanMemo.split(' ').filter(w => w.length >= 4);
     for (const word of words) {
       if (calculateSimilarity(word, token) >= 0.85) {
-        return {
-          original_memo: tx.memo,
-          clean_memo: cleanMemo,
-          amount: tx.amount,
-          type: tx.type,
-          category: rule.category,
-          subcategory: rule.subcategory,
-          rule_applied: rule.id,
-        };
+        return buildClassified(tx, cleanMemo, normalizeCategory(rule.category), rule.subcategory, rule.id);
       }
     }
   }
 
+  // Pass 3: heurística local (evita IA para casos óbvios)
+  const heuristicCategory = normalizeCategory(
+    localCategorizeHeuristic(cleanMemo, tx.amount, tx.type)
+  );
+  if (!needsAICategorization(heuristicCategory)) {
+    return buildClassified(tx, cleanMemo, heuristicCategory, 'HEURISTIC', undefined, getSuggestedIdentifier(cleanMemo));
+  }
+
+  return buildClassified(
+    tx,
+    cleanMemo,
+    'PENDENTE_CLASSIFICACAO',
+    'PENDENTE_CLASSIFICACAO',
+    undefined,
+    getSuggestedIdentifier(cleanMemo)
+  );
+}
+
+function buildClassified(
+  tx: RawTransaction,
+  cleanMemo: string,
+  category: string,
+  subcategory: string,
+  ruleApplied?: string,
+  suggestedIdentifier?: string
+): ClassifiedTransaction {
   return {
     original_memo: tx.memo,
     clean_memo: cleanMemo,
     amount: tx.amount,
     type: tx.type,
-    category: 'PENDENTE_CLASSIFICACAO',
-    subcategory: 'PENDENTE_CLASSIFICACAO',
-    suggested_identifier: getSuggestedIdentifier(cleanMemo),
+    category,
+    subcategory,
+    rule_applied: ruleApplied,
+    suggested_identifier: suggestedIdentifier ?? getSuggestedIdentifier(cleanMemo),
   };
+}
+
+/** Heurística local compartilhada com groq fallback */
+export function localCategorizeHeuristic(
+  description: string,
+  amount: number,
+  type: 'DEBIT' | 'CREDIT' = amount >= 0 ? 'CREDIT' : 'DEBIT'
+): string {
+  const desc = description.toUpperCase();
+
+  if (type === 'CREDIT' || amount > 0) return 'Receita';
+
+  if (/UBER|99APP|99 POP|GRALHA|POSTO|SHELL|IPIRANGA|GASOL|METRO|AUTOPASS|REDPASS|ESTACIONAMENTO|PEDAGIO|SEM PARAR|CONCESSIONARIA|MOBILIDADE/.test(desc)) {
+    return 'Transporte';
+  }
+  if (/IFOOD|RAPPI|MCDONALD|BURGER|RESTAURANTE|SUPERMERCADO|MERCEARIA|CARREFOUR|MERCADO|PADARIA|CAFE|ATACADAO|BAR|PIZZA|ZAFFARI|ASSAI|EXTRA HIPER/.test(desc)) {
+    return 'Alimentação';
+  }
+  if (/ALUGUEL|CONDOMINIO|LIGHT|ELETRO|SABESP|INTERNET|NET |CLARO|VIVO|FIBRA|ENEL|CEMIG|CPFL|GAS |IMOBILIAR/.test(desc)) {
+    return 'Moradia';
+  }
+  if (/DROGASIL|PAGUE MENOS|FARMACIA|MEDICO|CONSULTA|UNIMED|HAPVIDA|HOSPITAL|EXAME|ODONTO|DENTISTA|LABORATOR/.test(desc)) {
+    return 'Saúde';
+  }
+  if (/NETFLIX|SPOTIFY|STEAM|CINEMA|SHOW|HOTEL|DECOLAR|INGRESSO|PLAYSTATION|VIAGEM|DISNEY|HBO|PRIME VIDEO/.test(desc)) {
+    return 'Lazer';
+  }
+  if (/FACULDADE|CURSO|LIVRARIA|UDEMY|ALURA|SCHOOL|COLEGIO|IDIOMAS|EDUCA/.test(desc)) {
+    return 'Educação';
+  }
+  if (/PORTO SEG|TOKIO|SUHAI|AZUL SEG|BRADESCO SEG|SEGURO|ALLIANZ|MAPFRE/.test(desc)) {
+    return 'Seguro';
+  }
+  if (/TARIFA|IOF|MANUTENCAO|BANCO|JUROS|ANUIDADE|SERVICO|TAXA|TED DOC|DOC TED/.test(desc)) {
+    return 'Serviços';
+  }
+  if (/PIX (RECEB|ENV)|SALARIO|HOLERITE|PROVENTOS|RENDIMENTO/.test(desc)) {
+    return 'Receita';
+  }
+
+  return 'Outros';
 }

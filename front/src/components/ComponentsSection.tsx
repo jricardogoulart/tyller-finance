@@ -346,7 +346,7 @@ export function ComponentsSection() {
         
         <Button
           styleType="technical-fissure"
-          variant={activeTab === "layout" ? "primary" : "secondary"}
+          variant={activeTab === "layout" ? "primary" : "primary"}
           size="md"
           onClick={() => setActiveTab("layout")}
         >

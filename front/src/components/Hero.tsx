@@ -199,19 +199,6 @@ export function Hero({ currentRoute, onNavigate }: HeroProps) {
               </motion.button>
             )}
 
-            {currentRoute !== 'design-system' && (
-              <motion.button
-                whileHover={{ scale: 1.05, translateY: -1 }}
-                whileTap={{ scale: 0.95 }}
-                transition={{ type: "spring", stiffness: 400, damping: 15 }}
-                onClick={() => onNavigate('design-system')}
-                className="btn-glass-premium px-3.5 py-1.5 rounded-xl cursor-pointer text-xs flex items-center gap-1 font-medium"
-              >
-                DS
-              </motion.button>
-            )}
-
-            
             <motion.button
               whileHover={{ scale: 1.05, translateY: -1 }}
               whileTap={{ scale: 0.95 }}

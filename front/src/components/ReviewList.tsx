@@ -14,7 +14,7 @@ interface ReviewListProps {
   transactions: TransactionItem[];
   fileHash: string;
   filename: string;
-  onConfirm: (importedCount: number, skippedCount: number) => void;
+  onConfirm: (importedCount: number, skippedCount: number, autoCategorizedCount?: number) => void;
   onCancel: () => void;
 }
 
@@ -91,7 +91,11 @@ export function ReviewList({
         fileHash,
       });
       if (response.status === 200) {
-        onConfirm(response.data.importedCount, response.data.skippedCount);
+        onConfirm(
+          response.data.importedCount,
+          response.data.skippedCount,
+          response.data.autoCategorizedCount ?? 0
+        );
       }
     } catch (err: any) {
       console.error(err);

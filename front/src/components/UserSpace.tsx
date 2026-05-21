@@ -1,8 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import api, { createTransactionRule, fetchRules, deleteRule, approveRule, updateRule, deleteUpload } from '../utils/api';
+import { StatusBadge } from './design-system';
+import { Modal } from './ui/Modal';
 import { CategoryBadge } from './CategoryBadge';
 import { CATEGORIES_LIST } from '../utils/categories';
+import {
+  computeCashFlowTotals,
+  notifyDashboardRefresh,
+  partitionCategoriesByFlow,
+} from '../utils/categoryBreakdown';
 import { useAuth } from '../context/AuthContext';
 
 interface UploadHistoryItem {
@@ -13,21 +20,18 @@ interface UploadHistoryItem {
   upload_date: string;
 }
 
-interface ContextMapData {
-  average_spend: number;
-  top_category: string;
-  recurrence_patterns: string[];
-}
-
 interface Transaction {
   id: string;
   description: string;
   amount: number | string;
   date: string;
   category: string;
-  original_memo?: string;
   clean_memo?: string;
   suggested_identifier?: string;
+}
+
+function getTransactionLabel(tx: Transaction): string {
+  return tx.suggested_identifier?.trim() || tx.clean_memo?.trim() || tx.description?.trim() || '';
 }
 
 interface ClassificationRule {
@@ -69,12 +73,6 @@ export function UserSpace() {
   const [activeTab, setActiveTab] = useState<'uploads' | 'transactions' | 'rules'>('uploads');
   const [uploads, setUploads] = useState<UploadHistoryItem[]>([]);
   const [loadingUploads, setLoadingUploads] = useState(false);
-  const [contextMap, setContextMap] = useState<ContextMapData>({
-    average_spend: 0,
-    top_category: 'Nenhuma',
-    recurrence_patterns: ['Aguardando importações...']
-  });
-  const [isRecalculating, setIsRecalculating] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [uploadToDelete, setUploadToDelete] = useState<UploadHistoryItem | null>(null);
   const [isDeletingUpload, setIsDeletingUpload] = useState(false);
@@ -103,8 +101,10 @@ export function UserSpace() {
   // Transactions State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [isAutoCategorizing, setIsAutoCategorizing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [flowFilter, setFlowFilter] = useState<'expenses' | 'income' | 'all'>('expenses');
   const [sortField, setSortField] = useState<'date' | 'description' | 'amount'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -122,7 +122,7 @@ export function UserSpace() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Load History & Context Map
+  // Load History
   const fetchUploadHistory = async () => {
     setLoadingUploads(true);
     try {
@@ -132,17 +132,6 @@ export function UserSpace() {
       console.error('Failed to fetch upload history:', err);
     } finally {
       setLoadingUploads(false);
-    }
-  };
-
-  const fetchContextMap = async () => {
-    try {
-      const res = await api.get('/ai/context-map');
-      if (res.data?.contextMap) {
-        setContextMap(res.data.contextMap);
-      }
-    } catch (err) {
-      console.error('Failed to fetch context map:', err);
     }
   };
 
@@ -158,6 +147,20 @@ export function UserSpace() {
     }
   };
 
+  const runAutoCategorize = async () => {
+    setIsAutoCategorizing(true);
+    try {
+      await api.post('/ai/categorize');
+      await api.post('/ai/recalculate');
+      await fetchTransactions();
+      notifyDashboardRefresh();
+    } catch (err) {
+      console.error('Falha na categorização automática:', err);
+    } finally {
+      setIsAutoCategorizing(false);
+    }
+  };
+
   const fetchRulesList = async () => {
     setLoadingRules(true);
     try {
@@ -167,23 +170,6 @@ export function UserSpace() {
       console.error('Failed to fetch rules list:', err);
     } finally {
       setLoadingRules(false);
-    }
-  };
-
-  const handleOptimizeAI = async () => {
-    setIsRecalculating(true);
-    try {
-      await api.post('/ai/categorize');
-      const res = await api.post('/ai/recalculate');
-      if (res.data?.contextMap) {
-        setContextMap(res.data.contextMap);
-      }
-      await Promise.all([fetchTransactions(), fetchContextMap()]);
-    } catch (err) {
-      console.error('Erro ao otimizar IA:', err);
-      alert('Erro ao otimizar IA. Tente novamente.');
-    } finally {
-      setIsRecalculating(false);
     }
   };
 
@@ -209,10 +195,11 @@ export function UserSpace() {
   };
 
   useEffect(() => {
-    fetchUploadHistory();
-    fetchContextMap();
-    fetchTransactions();
-    fetchRulesList();
+    void (async () => {
+      await fetchUploadHistory();
+      await fetchRulesList();
+      await runAutoCategorize();
+    })();
   }, []);
 
   const handleUpdateCategory = async (txId: string, newCat: string) => {
@@ -224,7 +211,7 @@ export function UserSpace() {
       await api.put(`/ai/transactions/${txId}/category`, { category: newCat });
       
       // 2. Abre a sugestão interativa para salvar regra automática (Self-Learning)
-      const token = tx.suggested_identifier || tx.clean_memo || tx.description || '';
+      const token = getTransactionLabel(tx);
       setRuleConfirmModal({
         isOpen: true,
         transaction: tx,
@@ -232,8 +219,8 @@ export function UserSpace() {
         category: newCat
       });
 
-      // Atualiza localmente a lista de transações e o mapa de contexto
-      await Promise.all([fetchTransactions(), fetchContextMap()]);
+      await fetchTransactions();
+      notifyDashboardRefresh();
     } catch (err) {
       console.error('Failed to update category inline:', err);
     }
@@ -254,7 +241,8 @@ export function UserSpace() {
 
       setRuleConfirmModal(null);
       // O backend executou o Efeito Cascata em lote. Atualizamos tudo!
-      await Promise.all([fetchTransactions(), fetchContextMap(), fetchRulesList()]);
+      await Promise.all([fetchTransactions(), fetchRulesList()]);
+      notifyDashboardRefresh();
     } catch (err) {
       console.error('Failed to create transaction rule:', err);
     }
@@ -293,19 +281,34 @@ export function UserSpace() {
     }
   };
 
+  const cashFlowTotals = useMemo(() => computeCashFlowTotals(transactions), [transactions]);
+  const categoryFlowGroups = useMemo(
+    () => partitionCategoriesByFlow(transactions),
+    [transactions]
+  );
+
   const filteredTransactions = transactions
     .filter(tx => {
-      const matchSearch = tx.description.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          tx.category.toLowerCase().includes(searchTerm.toLowerCase());
+      const amountNum = typeof tx.amount === 'string' ? parseFloat(tx.amount) : tx.amount;
+      const isIncome = amountNum > 0;
+      const matchFlow =
+        flowFilter === 'all' ||
+        (flowFilter === 'expenses' && !isIncome) ||
+        (flowFilter === 'income' && isIncome);
+
+      const label = getTransactionLabel(tx).toLowerCase();
+      const matchSearch =
+        label.includes(searchTerm.toLowerCase()) ||
+        tx.category.toLowerCase().includes(searchTerm.toLowerCase());
       const matchCategory = categoryFilter === 'All' || tx.category === categoryFilter;
-      return matchSearch && matchCategory;
+      return matchFlow && matchSearch && matchCategory;
     })
     .sort((a, b) => {
       let comparison = 0;
       if (sortField === 'date') {
         comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
       } else if (sortField === 'description') {
-        comparison = a.description.localeCompare(b.description);
+        comparison = getTransactionLabel(a).localeCompare(getTransactionLabel(b));
       } else if (sortField === 'amount') {
         const valA = typeof a.amount === 'string' ? parseFloat(a.amount) : a.amount;
         const valB = typeof b.amount === 'string' ? parseFloat(b.amount) : b.amount;
@@ -313,8 +316,6 @@ export function UserSpace() {
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
-
-  const uniqueCategories = Array.from(new Set(transactions.map(tx => tx.category)));
 
   // Lista dinâmica de todas as categorias, incluindo categorias personalizadas criadas nas transações ou regras
   const dynamicCategoriesList = Array.from(new Set([
@@ -353,7 +354,7 @@ export function UserSpace() {
             </button>
           </h1>
           <p className="text-sm text-neutral-400 max-w-xl">
-            Histórico completo de extratos bancários, controle do IA Context Map e painel granular de transações com controle inline de categorias.
+            Histórico completo de extratos bancários e painel granular de transações com controle inline de categorias.
           </p>
         </div>
 
@@ -374,7 +375,7 @@ export function UserSpace() {
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
-            Meus Extratos & IA
+            Meus Extratos
           </button>
           <button
             onClick={() => setActiveTab('transactions')}
@@ -422,10 +423,10 @@ export function UserSpace() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -15 }}
             transition={{ duration: 0.2 }}
-            className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+            className="flex flex-col gap-8"
           >
             {/* Upload History List */}
-            <div className="lg:col-span-7 flex flex-col gap-6">
+            <div className="flex flex-col gap-6">
               <div className="bg-glass-card border-glass p-6 rounded-2xl">
                 <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
                   <div>
@@ -483,20 +484,11 @@ export function UserSpace() {
                             <span className="block text-xs font-bold text-neutral-300">
                               {upload.transaction_count} transações
                             </span>
-                            <span
-                              className={`inline-flex items-center gap-1 text-[10px] font-mono mt-0.5 px-2 py-0.5 rounded-full border ${
-                                upload.status === 'success'
-                                  ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
-                                  : 'text-amber-400 bg-amber-500/10 border-amber-500/30'
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  upload.status === 'success' ? 'bg-emerald-500' : 'bg-amber-500'
-                                }`}
-                              />
-                              {upload.status === 'success' ? 'Sucesso' : upload.status}
-                            </span>
+                            <StatusBadge
+                              label={upload.status === 'success' ? 'Sucesso' : upload.status}
+                              variant={upload.status === 'success' ? 'success' : 'warning'}
+                              className="mt-0.5"
+                            />
                           </div>
                           <button
                             type="button"
@@ -504,7 +496,7 @@ export function UserSpace() {
                               setUploadToDelete(upload);
                               setIsDeleteModalOpen(true);
                             }}
-                            className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors"
+                            className="btn-danger-ghost"
                             title="Excluir extrato"
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -522,34 +514,28 @@ export function UserSpace() {
                   </div>
                 )}
 
-                {isDeleteModalOpen && uploadToDelete && (
-                  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-neutral-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-neutral-700 shadow-2xl">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
-                          <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                            />
-                          </svg>
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-white">Excluir Extrato</h3>
-                          <p className="text-sm text-neutral-400">Esta ação não pode ser desfeita</p>
-                        </div>
-                      </div>
-                      <div className="bg-neutral-950/50 rounded-xl p-4 mb-4 border border-neutral-800">
-                        <p className="text-sm text-neutral-300 mb-2">
+                <Modal
+                  isOpen={isDeleteModalOpen && !!uploadToDelete}
+                  onClose={() => {
+                    if (!isDeletingUpload) {
+                      setIsDeleteModalOpen(false);
+                      setUploadToDelete(null);
+                    }
+                  }}
+                  title="Excluir Extrato"
+                >
+                  {uploadToDelete && (
+                    <>
+                      <p className="ds-card-subtitle mb-4">Esta ação não pode ser desfeita</p>
+                      <div className="ds-card-inset p-4 mb-4">
+                        <p className="text-sm mb-2" style={{ color: 'var(--color-neutral-300)' }}>
                           <strong>Arquivo:</strong> {uploadToDelete.filename}
                         </p>
-                        <p className="text-sm text-neutral-300">
+                        <p className="text-sm" style={{ color: 'var(--color-neutral-300)' }}>
                           <strong>Transações:</strong> {uploadToDelete.transaction_count} registros serão removidos
                         </p>
                       </div>
-                      <p className="text-sm text-neutral-400 mb-6">
+                      <p className="ds-card-subtitle mb-6">
                         Todas as transações importadas deste extrato serão permanentemente excluídas.
                       </p>
                       <div className="flex gap-3">
@@ -560,7 +546,7 @@ export function UserSpace() {
                             setUploadToDelete(null);
                           }}
                           disabled={isDeletingUpload}
-                          className="flex-1 py-2.5 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-300 font-medium hover:bg-neutral-750 transition-colors disabled:opacity-50"
+                          className="btn-tech-outline flex-1 py-2.5 px-4 rounded-xl font-medium disabled:opacity-50"
                         >
                           Cancelar
                         </button>
@@ -568,78 +554,14 @@ export function UserSpace() {
                           type="button"
                           onClick={handleDeleteUpload}
                           disabled={isDeletingUpload}
-                          className="flex-1 py-2.5 px-4 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400 font-medium hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                          className="btn-technical-fissure btn-danger flex-1 py-2.5 px-4 rounded-xl font-medium disabled:opacity-50"
                         >
                           {isDeletingUpload ? 'Excluindo...' : 'Excluir'}
                         </button>
                       </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* IA Context Map Display */}
-            <div className="lg:col-span-5 flex flex-col gap-6">
-              <div className="bg-glass-card border-glass p-6 rounded-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-[150px] h-[150px] bg-brand-400/5 blur-[50px] pointer-events-none" />
-                
-                <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
-                  <div>
-                    <h3 className="text-lg font-bold text-white">IA Context Map</h3>
-                    <p className="text-xs text-neutral-400">Perfil e padrões de gastos aprendidos</p>
-                  </div>
-                  <motion.button
-                    whileHover={{ scale: isRecalculating ? 1 : 1.05, translateY: isRecalculating ? 0 : -1.5 }}
-                    whileTap={{ scale: isRecalculating ? 1 : 0.95 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 15 }}
-                    disabled={isRecalculating}
-                    onClick={handleOptimizeAI}
-                    className="btn-tech-outline px-3.5 py-2 rounded-xl text-xs font-semibold tracking-wide flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    {isRecalculating ? (
-                      <>
-                        <span className="w-2.5 h-2.5 rounded-full border-t-transparent border-brand-400 animate-spin border-2" />
-                        Otimizando...
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-8.983m-8.982 3.125l5.247-5.247m-5.247 5.247L3 21l.125-8.982M18.982 12.017a8.25 8.25 0 00-13.802-1.685l.125 8.982" />
-                        </svg>
-                        Otimizar IA
-                      </>
-                    )}
-                  </motion.button>
-                </div>
-
-                <div className="flex flex-col gap-5">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 text-center">
-                      <span className="block text-[10px] font-mono tracking-widest text-neutral-500 uppercase">Média Mensal</span>
-                      <span className="block text-xl font-extrabold text-white mt-1">R$ {formatCurrency(contextMap.average_spend)}</span>
-                    </div>
-                    <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 text-center">
-                      <span className="block text-[10px] font-mono tracking-widest text-neutral-500 uppercase">Maior Categoria</span>
-                      <span className="block text-xl font-extrabold text-brand-400 mt-1">{contextMap.top_category}</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="block text-xs font-mono tracking-widest text-neutral-500 uppercase mb-3">Padrões de Recorrência (IA)</span>
-                    <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-                      {contextMap.recurrence_patterns.map((pattern, idx) => (
-                        <div
-                          key={idx}
-                          className="px-3.5 py-2.5 rounded-lg border border-neutral-800 bg-neutral-950/40 text-xs text-neutral-300 flex items-start gap-2.5"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-brand-400 mt-1.5 flex-shrink-0" />
-                          <span className="leading-relaxed">{pattern}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                    </>
+                  )}
+                </Modal>
               </div>
             </div>
           </motion.div>
@@ -652,8 +574,69 @@ export function UserSpace() {
             transition={{ duration: 0.2 }}
             className="flex flex-col gap-6"
           >
+            {/* Resumo entrou / saiu */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-glass-card border-glass p-4 rounded-2xl flex flex-col gap-1">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">Entrou</span>
+                <span className="text-lg font-bold font-mono text-emerald-400">
+                  R$ {cashFlowTotals.totalIn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="bg-glass-card border-glass p-4 rounded-2xl flex flex-col gap-1">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">Saiu</span>
+                <span className="text-lg font-bold font-mono text-red-400">
+                  R$ {cashFlowTotals.totalOut.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="bg-glass-card border-glass p-4 rounded-2xl flex flex-col gap-1">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">Saldo líquido</span>
+                <span
+                  className={`text-lg font-bold font-mono ${
+                    cashFlowTotals.net >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  R$ {cashFlowTotals.net.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
             {/* Advanced Filters */}
-            <div className="bg-glass-card border-glass p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="bg-glass-card border-glass p-5 rounded-2xl flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500 mr-1">
+                  Ver lançamentos
+                </span>
+                {(
+                  [
+                    { id: 'expenses' as const, label: 'Gastos (saídas)' },
+                    { id: 'income' as const, label: 'Entradas' },
+                    { id: 'all' as const, label: 'Todos' },
+                  ] as const
+                ).map(({ id, label }) => {
+                  const active = flowFilter === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setFlowFilter(id);
+                        if (id === 'expenses' && categoryFilter === 'Receita') {
+                          setCategoryFilter('All');
+                        }
+                      }}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors ${
+                        active
+                          ? 'border-brand-400 bg-brand-500/10 text-brand-400'
+                          : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex-1 flex flex-col sm:flex-row gap-3">
                 {/* Search */}
                 <div className="relative flex-1">
@@ -724,24 +707,96 @@ export function UserSpace() {
                             Todas Categorias
                           </button>
                           
-                          {uniqueCategories.map((cat) => (
-                            <button
-                              key={cat}
-                              type="button"
-                              onClick={() => {
-                                setCategoryFilter(cat);
-                                setIsFilterOpen(false);
-                              }}
-                              className={`w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors ${
-                                categoryFilter === cat
-                                  ? 'bg-brand-500/10 text-brand-400'
-                                  : 'text-neutral-300 hover:bg-white/5'
-                              }`}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full bg-brand-400" />
-                              {cat}
-                            </button>
-                          ))}
+                          {(flowFilter === 'income'
+                            ? categoryFlowGroups.incomeCategories
+                            : categoryFlowGroups.expenseCategories
+                          ).length > 0 && (
+                            <>
+                              <p className="px-3.5 pt-2 pb-1 text-[9px] font-mono uppercase tracking-widest text-neutral-500">
+                                {flowFilter === 'income' ? 'Categorias de entrada' : 'Categorias de gasto'}
+                              </p>
+                              {(flowFilter === 'income'
+                                ? categoryFlowGroups.incomeCategories
+                                : categoryFlowGroups.expenseCategories
+                              ).map((cat) => (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  onClick={() => {
+                                    setCategoryFilter(cat);
+                                    setIsFilterOpen(false);
+                                  }}
+                                  className={`w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors ${
+                                    categoryFilter === cat
+                                      ? 'bg-brand-500/10 text-brand-400'
+                                      : 'text-neutral-300 hover:bg-white/5'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      flowFilter === 'income' ? 'bg-emerald-400' : 'bg-red-400'
+                                    }`}
+                                  />
+                                  {cat}
+                                </button>
+                              ))}
+                            </>
+                          )}
+
+                          {flowFilter === 'all' && (
+                            <>
+                              {categoryFlowGroups.expenseCategories.length > 0 && (
+                                <>
+                                  <p className="px-3.5 pt-2 pb-1 text-[9px] font-mono uppercase tracking-widest text-neutral-500">
+                                    Gastos
+                                  </p>
+                                  {categoryFlowGroups.expenseCategories.map((cat) => (
+                                    <button
+                                      key={`exp-${cat}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setCategoryFilter(cat);
+                                        setIsFilterOpen(false);
+                                      }}
+                                      className={`w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors ${
+                                        categoryFilter === cat
+                                          ? 'bg-brand-500/10 text-brand-400'
+                                          : 'text-neutral-300 hover:bg-white/5'
+                                      }`}
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                                      {cat}
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                              {categoryFlowGroups.incomeCategories.length > 0 && (
+                                <>
+                                  <p className="px-3.5 pt-2 pb-1 text-[9px] font-mono uppercase tracking-widest text-neutral-500">
+                                    Entradas
+                                  </p>
+                                  {categoryFlowGroups.incomeCategories.map((cat) => (
+                                    <button
+                                      key={`inc-${cat}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setCategoryFilter(cat);
+                                        setIsFilterOpen(false);
+                                      }}
+                                      className={`w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors ${
+                                        categoryFilter === cat
+                                          ? 'bg-brand-500/10 text-brand-400'
+                                          : 'text-neutral-300 hover:bg-white/5'
+                                      }`}
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                      {cat}
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                            </>
+                          )}
                         </div>
                       </motion.div>
                     )}
@@ -753,6 +808,7 @@ export function UserSpace() {
                 <span className="text-[10px] font-mono tracking-widest text-neutral-500 uppercase">
                   {filteredTransactions.length} registros filtrados
                 </span>
+              </div>
               </div>
             </div>
 
@@ -804,12 +860,14 @@ export function UserSpace() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loadingTransactions ? (
+                    {loadingTransactions || isAutoCategorizing ? (
                       <tr>
                         <td colSpan={4} className="p-12 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <div className="w-8 h-8 rounded-full border-t-2 border-brand-400 border-l-transparent border-r-transparent animate-spin" />
-                            <span className="text-xs text-neutral-500 font-mono">Carregando lançamentos...</span>
+                            <span className="text-xs text-neutral-500 font-mono">
+                              {isAutoCategorizing ? 'Categorizando automaticamente...' : 'Carregando lançamentos...'}
+                            </span>
                           </div>
                         </td>
                       </tr>
@@ -834,7 +892,7 @@ export function UserSpace() {
                               {formatDate(tx.date)}
                             </td>
                             <td className="p-4 text-sm font-semibold text-neutral-200" style={{ fontFamily: 'var(--font-family-body)' }}>
-                              {tx.description}
+                              {getTransactionLabel(tx)}
                             </td>
                             <td className="p-4">
                               <CategoryBadge
@@ -965,23 +1023,18 @@ export function UserSpace() {
                               </td>
                               <td className="p-4 text-xs font-semibold">
                                 {rule.transaction_type === 'DEBIT' ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono border border-red-500/30 bg-red-500/10 text-red-400">Débito</span>
+                                  <StatusBadge label="Débito" variant="error" />
                                 ) : rule.transaction_type === 'CREDIT' ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono border border-success-500/30 bg-success-500/10 text-success-400">Crédito</span>
+                                  <StatusBadge label="Crédito" variant="success" />
                                 ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono border border-neutral-700 bg-neutral-800 text-neutral-400">Qualquer</span>
+                                  <StatusBadge label="Qualquer" variant="neutral" />
                                 )}
                               </td>
                               <td className="p-4 text-xs font-semibold">
                                 {isAiSuggested ? (
-                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 animate-pulse-glow">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                                    IA Sugerida
-                                  </div>
+                                  <StatusBadge label="IA Sugerida" variant="info" />
                                 ) : (
-                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-mono border border-success-500/30 bg-success-500/10 text-success-400">
-                                    Manual
-                                  </span>
+                                  <StatusBadge label="Manual" variant="neutral" />
                                 )}
                               </td>
                               <td className="p-4 text-right">
@@ -998,7 +1051,7 @@ export function UserSpace() {
                                           console.error('Failed to approve rule:', err);
                                         }
                                       }}
-                                      className="px-2.5 py-1 bg-amber-500 text-neutral-950 hover:bg-amber-400 transition-colors rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                      className="btn-tech-outline px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer"
                                       title="Aprovar e tornar permanente"
                                     >
                                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -1199,7 +1252,7 @@ export function UserSpace() {
                         });
                       }
                       setIsEditingRuleModal(false);
-                      await Promise.all([fetchRulesList(), fetchTransactions(), fetchContextMap()]);
+                      await Promise.all([fetchRulesList(), fetchTransactions()]);
                     } catch (err: any) {
                       console.error('Failed to save rule:', err);
                       const errMsg = err.response?.data?.error || 'Falha ao salvar regra de transação.';
@@ -1252,7 +1305,7 @@ export function UserSpace() {
               </div>
 
               <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-950/40 text-xs text-neutral-300 mb-5 leading-relaxed">
-                Você definiu a categoria da transação <span className="font-semibold text-white">"{ruleConfirmModal.transaction.description}"</span> como <span className="font-bold text-brand-400">{ruleConfirmModal.category}</span>.
+                Você definiu a categoria da transação <span className="font-semibold text-white">"{getTransactionLabel(ruleConfirmModal.transaction)}"</span> como <span className="font-bold text-brand-400">{ruleConfirmModal.category}</span>.
                 <div className="mt-2.5 pt-2.5 border-t border-neutral-850 text-neutral-400">
                   💡 <span className="text-neutral-300"><b>Efeito Cascata</b></span>: Salvar esta regra aplicará automaticamente a categoria <span className="font-bold text-neutral-200">{ruleConfirmModal.category}</span> em <b>todas</b> as transações pendentes ou sem classificação que correspondam a este termo imediatamente!
                 </div>

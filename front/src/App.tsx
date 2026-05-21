@@ -10,6 +10,20 @@ import { ComponentsSection } from "./components/ComponentsSection";
 import { TokenExplorer } from "./components/TokenExplorer";
 import { ProjectionsChart } from "./components/ProjectionsChart";
 import { ActionPlanPanel } from "./components/ActionPlanPanel";
+import {
+  GlassCard,
+  StatusBadge,
+  CategoryRankingCard,
+  RecurrenceInsightsCard,
+  renderPlanMarkdown,
+} from "./components/design-system";
+import {
+  computeCategoryBreakdown,
+  computeCashFlowTotals,
+  computeExpenseRecurrencePatterns,
+  computeMonthlyAverageExpense,
+  DASHBOARD_REFRESH_EVENT,
+} from "./utils/categoryBreakdown";
 import { UserSpace } from "./components/UserSpace";
 import { ProfileSpace } from "./components/ProfileSpace";
 import { BackgroundEffects } from "./components/layout/BackgroundEffects";
@@ -224,7 +238,7 @@ function Footer({ isDesignSystem }: { isDesignSystem?: boolean }) {
   );
 }
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { UploadCard } from "./components/UploadCard";
 import { ReviewList } from "./components/ReviewList";
 import { TransactionList } from "./components/TransactionList";
@@ -520,6 +534,13 @@ function MainLayout() {
   const [projectionPoints, setProjectionPoints] = useState<any[]>([]);
   const [actionPlan, setActionPlan] = useState('');
   const [loadingPlan, setLoadingPlan] = useState(false);
+  const [projectionSummary, setProjectionSummary] = useState<{
+    currentBalance: number;
+    dailyExpenseAverage: number;
+    projectedEndBalance: number;
+    estimatedSavings30d: number;
+    reductionPercent: number;
+  } | null>(null);
 
   // Evolução Histórica State
   const [dashboardTab, setDashboardTab] = useState<'atual' | 'historico'>('atual');
@@ -527,6 +548,28 @@ function MainLayout() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
   const [historyError, setHistoryError] = useState('');
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
+
+  const categoryBreakdown = useMemo(
+    () => computeCategoryBreakdown(transactions),
+    [transactions]
+  );
+
+  const cashFlowTotals = useMemo(
+    () => computeCashFlowTotals(transactions),
+    [transactions]
+  );
+
+  const expenseRecurrencePatterns = useMemo(() => {
+    const local = computeExpenseRecurrencePatterns(transactions);
+    if (local.length > 0) return local;
+    return contextMap.recurrence_patterns;
+  }, [transactions, contextMap.recurrence_patterns]);
+
+  const monthlyAverageExpense = useMemo(
+    () => computeMonthlyAverageExpense(transactions),
+    [transactions]
+  );
 
   const fetchHistory = async () => {
     setLoadingHistory(true);
@@ -581,45 +624,84 @@ function MainLayout() {
       if (response.data) {
         setHistoricalPoints(response.data.historicalPoints || []);
         setProjectionPoints(response.data.projectionPoints || []);
+        setProjectionSummary({
+          currentBalance: response.data.currentBalance ?? 0,
+          dailyExpenseAverage: response.data.dailyExpenseAverage ?? 0,
+          projectedEndBalance: response.data.projectedEndBalance ?? 0,
+          estimatedSavings30d: response.data.estimatedSavings30d ?? 0,
+          reductionPercent: response.data.reductionPercent ?? 0,
+        });
       }
+      return response.data;
     } catch (err) {
       console.error('Failed to fetch projections:', err);
+      return null;
     }
   };
 
-  const handleGenerateActionPlan = async () => {
-    if (economyLevel === 'none') {
-      alert('Por favor, selecione uma meta de economia (Leve, Moderado ou Intenso) antes de gerar o plano.');
-      return;
-    }
+  const generateActionPlanForLevel = async (level: 'leve' | 'moderado' | 'intenso') => {
     setLoadingPlan(true);
+    setUploadError('');
     try {
-      const response = await api.post('/ai/action-plan', { economyLevel });
+      const response = await api.post('/ai/action-plan', { economyLevel: level });
       if (response.data?.plan) {
         setActionPlan(response.data.plan);
-        await saveActionPlan({ economyLevel, planContent: response.data.plan });
-        fetchHistory();
+        await saveActionPlan({ economyLevel: level, planContent: response.data.plan });
+        await fetchHistory();
+        setDashboardRefreshKey((k) => k + 1);
       }
     } catch (err) {
       console.error('Failed to generate action plan:', err);
+      setUploadError('Erro ao gerar o plano estratégico. Tente novamente.');
     } finally {
       setLoadingPlan(false);
     }
   };
 
+  const handleEconomyLevelSelect = async (level: 'none' | 'leve' | 'moderado' | 'intenso') => {
+    setEconomyLevel(level);
+    await fetchProjections(level);
+    if (level === 'none') {
+      setActionPlan('');
+    }
+  };
+
+  const handleGenerateStrategicPlan = async () => {
+    if (economyLevel === 'none') {
+      setUploadError('Selecione Leve, Moderado ou Intenso antes de gerar o plano estratégico.');
+      return;
+    }
+    await generateActionPlanForLevel(economyLevel);
+  };
+
+  const refreshDashboardData = useCallback(async () => {
+    await Promise.all([fetchTransactions(), fetchContextMap(), fetchProjections(economyLevel)]);
+    if (dashboardTab === 'historico') {
+      await fetchHistory();
+    }
+    setDashboardRefreshKey((k) => k + 1);
+  }, [economyLevel, dashboardTab]);
+
   useEffect(() => {
     if (user) {
-      fetchTransactions();
-      fetchContextMap();
-      fetchProjections();
+      void refreshDashboardData();
     }
   }, [user]);
 
   useEffect(() => {
     if (user && dashboardTab === 'historico') {
       fetchHistory();
+      fetchProjections(economyLevel);
     }
   }, [user, dashboardTab]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void refreshDashboardData();
+    };
+    window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+  }, [refreshDashboardData]);
 
   const handleParsed = (data: { transactions: any[]; fileHash: string; filename: string }) => {
     setParsedTransactions(data.transactions);
@@ -629,32 +711,17 @@ function MainLayout() {
     setSuccessMessage('');
   };
 
-  const handleConfirmImport = async (importedCount: number, skippedCount: number) => {
-    const total = parsedTransactions.length;
-    const outrosCount = parsedTransactions.filter(t => t.category === 'Outros').length;
-    const needsAutoAI = total > 0 && (outrosCount / total) > 0.8;
-
+  const handleConfirmImport = async (importedCount: number, skippedCount: number, autoCategorizedCount = 0) => {
     setParsedTransactions([]);
     setPendingFileHash('');
     setPendingFilename('');
     setSuccessMessage(
       `Importação concluída! ${importedCount} transações adicionadas.` +
-      (skippedCount > 0 ? ` (${skippedCount} duplicadas ignoradas).` : '')
+      (skippedCount > 0 ? ` (${skippedCount} duplicadas ignoradas).` : '') +
+      (autoCategorizedCount > 0 ? ` ${autoCategorizedCount} categorizadas automaticamente.` : '')
     );
-    await fetchTransactions();
-    
-    if (needsAutoAI) {
-      handleOptimizeAI();
-    } else {
-      // Auto recalculate Context Map on import background to stay fresh!
-      api.post('/ai/recalculate').then(res => {
-        if (res.data?.contextMap) {
-          setContextMap(res.data.contextMap);
-        }
-        fetchProjections(economyLevel);
-      }).catch(console.error);
-    }
-    
+    await refreshDashboardData();
+
     // Clear toast message after 5 seconds
     setTimeout(() => {
       setSuccessMessage('');
@@ -673,25 +740,15 @@ function MainLayout() {
     setUploadError('');
     setSuccessMessage('');
     try {
-      // 1. Categorize all pending transactions
       const catRes = await api.post('/ai/categorize');
       const categorizedCount = catRes.data?.categorizedCount || 0;
 
-      // 2. Recalculate context map
-      const recapRes = await api.post('/ai/recalculate');
-      if (recapRes.data?.contextMap) {
-        setContextMap(recapRes.data.contextMap);
-      }
+      await api.post('/ai/recalculate');
+      await refreshDashboardData();
 
-      // 3. Refresh transactions list
-      await fetchTransactions();
-
-      // 4. Refresh projections
-      await fetchProjections(economyLevel);
-
-      // 5. Emit premium success Toast
+      // Emit premium success Toast
       setSuccessMessage(
-        `IA Otimizada! ${categorizedCount} novas transações categorizadas, IA Context Map e Projeções recalculados.`
+        `Categorização concluída! ${categorizedCount} transações atualizadas. Ranking e projeções recalculados.`
       );
       
       setTimeout(() => {
@@ -712,18 +769,11 @@ function MainLayout() {
 
       await api.put(`/ai/transactions/${transactionId}/category`, { category: newCategory });
       
-      // Update reatively
-      setTransactions(prev =>
-        prev.map(t => t.id === transactionId ? { ...t, category: newCategory } : t)
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === transactionId ? { ...t, category: newCategory } : t))
       );
-      
-      // Async update context map in background
-      api.post('/ai/recalculate').then(res => {
-        if (res.data?.contextMap) {
-          setContextMap(res.data.contextMap);
-        }
-        fetchProjections(economyLevel);
-      }).catch(console.error);
+
+      void api.post('/ai/recalculate').then(() => refreshDashboardData()).catch(console.error);
 
       // Abre a sugestão interativa para salvar regra automática (Self-Learning)
       const token = tx.suggested_identifier || tx.clean_memo || tx.description || '';
@@ -753,8 +803,7 @@ function MainLayout() {
       });
 
       setRuleConfirmModal(null);
-      // O backend executou o Efeito Cascata em lote. Atualizamos tudo!
-      await fetchTransactions();
+      await refreshDashboardData();
       // Recalcular mapa e projeções
       const recapRes = await api.post('/ai/recalculate');
       if (recapRes.data?.contextMap) {
@@ -945,53 +994,13 @@ function MainLayout() {
                     )}
                   </div>
 
-                  {/* Right Side: IA Context Map - Card Resumido */}
-                  <motion.div
-                    variants={cardVariants}
-                    className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 backdrop-blur-sm rounded-2xl p-6 border border-slate-700/50 shadow-xl"
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center">
-                          <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                          </svg>
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-slate-100">IA Context Map</h3>
-                          <p className="text-xs text-slate-400">Análise de hábitos financeiros</p>
-                        </div>
-                      </div>
-                      <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        IA Atualizada
-                      </span>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-400">Gasto médio mensal</span>
-                        <span className="text-lg font-semibold text-slate-100">
-                          R$ {contextMap.average_spend.toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-slate-400">Categoria principal</span>
-                        <span className="text-sm font-medium text-amber-400">
-                          {contextMap.top_category}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => navigateTo('user-space')}
-                      className="mt-4 w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 text-amber-400 font-medium text-sm hover:from-amber-500/20 hover:to-orange-500/20 transition-all duration-200 flex items-center justify-center gap-2"
-                    >
-                      Ver Detalhes
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  </motion.div>
+                  <CategoryRankingCard
+                    motionProps={{ variants: dashboardCardVariants }}
+                    items={categoryBreakdown}
+                    cashFlow={cashFlowTotals}
+                    monthlyAverageExpense={monthlyAverageExpense}
+                    onViewDetails={() => navigateTo('user-space')}
+                  />
 
                 </motion.div>
 
@@ -1011,65 +1020,122 @@ function MainLayout() {
                   <h3 className="text-[11px] uppercase tracking-widest font-mono font-bold text-neutral-500 border-b border-neutral-800/60 pb-3">
                     Simulação & Novo Plano Estratégico
                   </h3>
-                  <motion.div 
-                    variants={dashboardCardVariants} 
-                    initial="hidden" 
-                    animate="visible" 
-                    className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch mt-2"
+                  <motion.div
+                    variants={dashboardCardVariants}
+                    initial="hidden"
+                    animate="visible"
+                    className="flex flex-col gap-6 mt-2"
                   >
-                    <div className="md:col-span-2 flex flex-col gap-6">
-                      {/* Chart controls & Chart */}
-                      <div className="flex flex-col gap-4">
-                        {/* Neon Economy Level Selectors */}
-                        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl border" style={{
-                          backgroundColor: 'var(--color-neutral-900)',
-                          borderColor: 'var(--color-neutral-800)',
-                        }}>
-                          <div className="flex flex-col text-left">
-                            <span className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider">Simular Economia</span>
-                            <span className="text-xs text-neutral-300">Escolha seu nível de disciplina para este mês</span>
+                    <div className="ds-glass-card p-4 flex flex-col gap-4">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex flex-col text-left">
+                          <span className="ds-stat-label">Simular economia</span>
+                          <span className="ds-card-subtitle mt-1">
+                            Simule o gráfico pelo nível; gere o plano só quando quiser (economiza tokens)
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(['none', 'leve', 'moderado', 'intenso'] as const).map((level) => {
+                            const labelMap = {
+                              none: 'Sem Meta',
+                              leve: 'Leve (10%)',
+                              moderado: 'Moderado (25%)',
+                              intenso: 'Intenso (50%)',
+                            };
+                            const active = economyLevel === level;
+                            return (
+                              <button
+                                key={level}
+                                type="button"
+                                disabled={loadingPlan}
+                                onClick={() => void handleEconomyLevelSelect(level)}
+                                className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all duration-300 cursor-pointer disabled:opacity-50 ${
+                                  active
+                                    ? 'border-brand-400 text-neutral-950 font-bold'
+                                    : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                                }`}
+                                style={{
+                                  backgroundColor: active ? 'var(--color-brand-400)' : 'transparent',
+                                  boxShadow: active ? '0 0 12px rgba(163, 230, 53, 0.2)' : 'none',
+                                }}
+                              >
+                                {labelMap[level]}
+                              </button>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            disabled={loadingPlan || economyLevel === 'none'}
+                            onClick={() => void handleGenerateStrategicPlan()}
+                            className="btn-tech px-4 py-2 rounded-xl text-xs font-bold tracking-wide disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            {loadingPlan ? 'Gerando plano...' : 'Gerar plano estratégico'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {projectionSummary && economyLevel !== 'none' && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="ds-card-inset p-3">
+                            <span className="ds-stat-label block">Saldo atual</span>
+                            <span className="ds-stat-value text-sm mt-1">
+                              R$ {projectionSummary.currentBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
                           </div>
-                          <div className="flex gap-2">
-                            {(['none', 'leve', 'moderado', 'intenso'] as const).map((level) => {
-                              const labelMap = { none: 'Sem Meta', leve: 'Leve (10%)', moderado: 'Moderado (25%)', intenso: 'Intenso (50%)' };
-                              const active = economyLevel === level;
-                              return (
-                                <button
-                                  key={level}
-                                  onClick={() => {
-                                    setEconomyLevel(level);
-                                    fetchProjections(level);
-                                  }}
-                                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all duration-300 cursor-pointer ${
-                                    active 
-                                      ? 'border-brand-400 text-neutral-950 font-bold' 
-                                      : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'
-                                  }`}
-                                  style={{
-                                    backgroundColor: active ? 'var(--color-brand-400)' : 'transparent',
-                                    boxShadow: active ? '0 0 12px rgba(163, 230, 53, 0.2)' : 'none',
-                                  }}
-                                >
-                                  {labelMap[level]}
-                                </button>
-                              );
-                            })}
+                          <div className="ds-card-inset p-3">
+                            <span className="ds-stat-label block">Saldo dia 30</span>
+                            <span className="ds-stat-value text-sm mt-1">
+                              R$ {projectionSummary.projectedEndBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <div className="ds-card-inset p-3">
+                            <span className="ds-stat-label block">Economia estimada</span>
+                            <span className="ds-stat-value-brand text-sm mt-1">
+                              R$ {projectionSummary.estimatedSavings30d.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <div className="ds-card-inset p-3">
+                            <span className="ds-stat-label block">Meta de corte</span>
+                            <span className="ds-stat-value text-sm mt-1">
+                              {projectionSummary.reductionPercent}%
+                            </span>
                           </div>
                         </div>
+                      )}
+                    </div>
 
-                        <ProjectionsChart
-                          historical={historicalPoints}
-                          projected={projectionPoints}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="flex">
-                      <ActionPlanPanel
-                        loadingGenerate={loadingPlan}
-                        onGenerate={handleGenerateActionPlan}
-                      />
-                    </div>
+                    <ProjectionsChart
+                      historical={historicalPoints}
+                      projected={projectionPoints}
+                    />
+
+                    {(actionPlan || loadingPlan) && economyLevel !== 'none' && (
+                      <GlassCard className="p-6">
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                          <div>
+                            <h3 className="ds-card-title">Plano estratégico</h3>
+                            <p className="ds-card-subtitle mt-1">
+                              Baseado na simulação de fluxo de caixa (30 dias) — meta{' '}
+                              {economyLevel.charAt(0).toUpperCase() + economyLevel.slice(1)}
+                            </p>
+                          </div>
+                          {loadingPlan && (
+                            <span className="text-xs font-mono text-brand-400 animate-pulse">
+                              Gerando com Groq...
+                            </span>
+                          )}
+                        </div>
+                        {actionPlan ? (
+                          <div className="max-h-[320px] overflow-y-auto pr-2 text-left">
+                            {renderPlanMarkdown(actionPlan)}
+                          </div>
+                        ) : (
+                          <p className="ds-card-subtitle">Aguarde, o plano está sendo gerado...</p>
+                        )}
+                      </GlassCard>
+                    )}
+
+                    <ActionPlanPanel refreshKey={dashboardRefreshKey} />
                   </motion.div>
                 </div>
 
@@ -1164,6 +1230,8 @@ function MainLayout() {
                         {/* Chart (M-02) */}
                         {selectedPlan && <EvolucaoChart selectedPlan={selectedPlan} />}
 
+                        <RecurrenceInsightsCard patterns={expenseRecurrencePatterns} />
+
                         {/* List of Plans (M-03) */}
                         <div className="rounded-2xl border p-5 flex flex-col gap-4 bg-neutral-900 border-neutral-800">
                           <div className="text-left">
@@ -1253,72 +1321,8 @@ function MainLayout() {
 
                       </div>
 
-                      {/* Right: Plan details & Category breakdown */}
+                      {/* Right: Plan details */}
                       <div className="flex flex-col gap-6">
-                        
-                        {/* Breakdown (M-04) */}
-                        {selectedPlan && (
-                          <div className="rounded-2xl border p-5 flex flex-col gap-4 bg-neutral-900 border-neutral-800">
-                            <div className="text-left">
-                              <h4 style={{
-                                fontFamily: 'var(--font-family-body)',
-                                fontSize: 'var(--font-size-sm)',
-                                fontWeight: 'var(--font-weight-semibold)' as any,
-                                color: 'var(--color-neutral-100)'
-                              }}>
-                                Distribuição de Gastos por Categoria
-                              </h4>
-                              <p className="text-[10px] text-neutral-400 font-mono">
-                                Percentual de despesas no período do plano
-                              </p>
-                            </div>
-
-                            <div className="flex flex-col gap-3">
-                              {selectedPlan.category_percentages && selectedPlan.category_percentages.length > 0 ? (
-                                selectedPlan.category_percentages.map((cat: any, idx: number) => {
-                                  const colors = [
-                                    'var(--color-brand-400)',
-                                    'var(--color-success-500)',
-                                    'var(--color-warning-500)',
-                                    '#3b82f6',
-                                    '#a855f7',
-                                    '#ec4899',
-                                  ];
-                                  const color = colors[idx % colors.length];
-
-                                  return (
-                                    <motion.div
-                                      key={cat.category}
-                                      whileHover={{ scale: 1.02 }}
-                                      className="p-3 rounded-xl border bg-neutral-950/20 flex flex-col gap-1.5"
-                                      style={{ borderColor: 'var(--color-neutral-850)' }}
-                                    >
-                                      <div className="flex justify-between items-center text-xs">
-                                        <span className="font-semibold text-neutral-200">{cat.category}</span>
-                                        <span className="font-mono text-neutral-400 font-bold">{cat.percentage.toFixed(1)}%</span>
-                                      </div>
-                                      <div className="w-full h-1.5 rounded-full bg-neutral-850 overflow-hidden">
-                                        <motion.div
-                                          initial={{ width: 0 }}
-                                          animate={{ width: `${cat.percentage}%` }}
-                                          transition={{ duration: 0.8, ease: "easeOut" }}
-                                          className="h-full rounded-full"
-                                          style={{ backgroundColor: color }}
-                                        />
-                                      </div>
-                                    </motion.div>
-                                  );
-                                })
-                              ) : (
-                                <div className="text-center py-4 text-xs text-neutral-500 font-mono">
-                                  Nenhum gasto registrado no período.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Plan Markdown Render */}
                         {selectedPlan && (
                           <div className="rounded-2xl border p-5 flex flex-col gap-4 bg-neutral-900 border-neutral-800">
                             <div className="text-left">

@@ -1,4 +1,12 @@
 import dotenv from 'dotenv';
+import {
+  localCategorizeHeuristic,
+  normalizeCategory,
+  needsAICategorization,
+  sanitizeMemo,
+  getSuggestedIdentifier,
+  VALID_CATEGORIES,
+} from './TransactionClassifier';
 
 dotenv.config();
 
@@ -23,22 +31,9 @@ async function fetchWithTimeout(url: string, options: any, timeoutMs = 5000): Pr
   }
 }
 
-// Local categorizer regex mock for absolute resiliency
+/** @deprecated Use localCategorizeHeuristic — mantido para compatibilidade */
 export function localCategorizeMock(description: string, amount: number): string {
-  const desc = description.toUpperCase();
-  
-  // If amount is positive, categorize as Receita
-  if (amount > 0) return 'Receita';
-  
-  if (/UBER|99APP|GRALHA|POSTO|SHELL|IPIRANGA|GASOL|METRO|AUTOPASS|REDPASS|ESTACIONAMENTO|PEDAGIO/.test(desc)) return 'Transporte';
-  if (/IFOOD|MCDONALD|BURGER|RESTAURANTE|SUPERMERCADO|REGINA|MERCEARIA|CARREFOUR|MERCADO|PADARIA|CAFE|ATACADAO|BAR|PIZZA/.test(desc)) return 'Alimentação';
-  if (/ALUGUEL|CONDOMINIO|LIGHT|ELETRO|SABESP|INTERNET|NET|CLARO|VIVO|FIBRA|ENEL|GAS/.test(desc)) return 'Moradia';
-  if (/DRG|DROGASIL|PAGUE MENOS|FARMACIA|MEDICO|CONSULTA|UNIMED|HAPVIDA|LABORA|HOSPITAL|EXAME|ODONTO/.test(desc)) return 'Saúde';
-  if (/NETFLIX|SPOTIFY|STEAM|CINEMA|SHOW|HOTEL|DECOLAR|INGRESSO|PLAYSTATION|NINTENDO|VIAGEM/.test(desc)) return 'Lazer';
-  if (/FACULDADE|CURSO|LIVRARIA|UDEMY|ALURA|SCHOOL|COLEGIO|IDIOMAS/.test(desc)) return 'Educação';
-  if (/TARIFA|IOF|MANUTENCAO|BANCO|JUROS|ANUIDADE|SERVICO/.test(desc)) return 'Serviços';
-  
-  return 'Outros';
+  return localCategorizeHeuristic(description, amount);
 }
 
 /**
@@ -51,7 +46,7 @@ export function anonymizePII(text: string): string {
 
   // Redact CPF (e.g., 123.456.789-00 or 12345678900)
   sanitized = sanitized.replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '[REDACTED_CPF]');
-  
+
   // Redact Emails
   sanitized = sanitized.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[REDACTED_EMAIL]');
 
@@ -67,49 +62,104 @@ interface TransactionItem {
   amount: number;
 }
 
+export interface CategorizeBatchContext {
+  userRules?: Array<{ search_token: string; category: string }>;
+}
+
+function applyLocalPass(transactions: TransactionItem[]): {
+  resolved: Record<string, string>;
+  pending: TransactionItem[];
+} {
+  const resolved: Record<string, string> = {};
+  const pending: TransactionItem[] = [];
+
+  for (const t of transactions) {
+    const category = normalizeCategory(localCategorizeHeuristic(t.description, Number(t.amount)));
+    if (needsAICategorization(category)) {
+      pending.push(t);
+    } else {
+      resolved[t.id] = category;
+    }
+  }
+
+  return { resolved, pending };
+}
+
+function buildRulesHint(rules: Array<{ search_token: string; category: string }>): string {
+  if (!rules.length) return '';
+  const sample = rules.slice(0, 40).map((r) => `"${r.search_token}" → ${normalizeCategory(r.category)}`);
+  return `\nRegras já aprendidas pelo usuário (priorize quando a descrição contiver o token):\n${sample.join('\n')}`;
+}
+
 /**
- * Categorize a batch of transactions using Groq API, falling back to local regex categorizer.
+ * Cascata: heurística local → Groq só para incertos → fallback local.
  */
-export async function categorizeTransactionsBatch(transactions: TransactionItem[]): Promise<Record<string, string>> {
+export async function categorizeTransactionsBatch(
+  transactions: TransactionItem[],
+  context: CategorizeBatchContext = {}
+): Promise<Record<string, string>> {
   if (transactions.length === 0) return {};
 
-  if (!GROQ_API_KEY) {
-    console.warn('[TyllerFinance AI] GROQ_API_KEY missing. Falling back to high-fidelity local Regex categorizer.');
-    const result: Record<string, string> = {};
-    for (const t of transactions) {
-      result[t.id] = localCategorizeMock(t.description, Number(t.amount));
+  const { resolved, pending } = applyLocalPass(transactions);
+  if (pending.length === 0) return resolved;
+
+  const finalize = (aiMap: Record<string, string>) => {
+    const out = { ...resolved };
+    for (const t of pending) {
+      const cat = normalizeCategory(aiMap[t.id]);
+      out[t.id] = needsAICategorization(cat)
+        ? normalizeCategory(localCategorizeHeuristic(t.description, Number(t.amount)))
+        : cat;
     }
-    return result;
+    return out;
+  };
+
+  if (!GROQ_API_KEY) {
+    return finalize({});
   }
 
   try {
+    const rulesHint = buildRulesHint(context.userRules || []);
     const promptSystem = `Você é o motor de categorização financeira do TyllerFinance.
-Receba um array JSON de transações brasileiras contendo ID, descrição e valor (em reais).
-Retorne um objeto JSON onde cada chave é o ID da transação e o valor é uma das categorias oficiais listadas:
-["Moradia", "Alimentação", "Transporte", "Saúde", "Lazer", "Educação", "Serviços", "Receita", "Outros"]
+Receba transações brasileiras (id, descrição, valor).
+Retorne JSON {"ID": "CATEGORIA"} usando EXATAMENTE uma destas categorias:
+${JSON.stringify([...VALID_CATEGORIES])}
 
-Regras Estritas:
-1. Ignore o sinal do valor; valores positivos geralmente são "Receita".
-2. Se a descrição contiver "UBER", "99APP", "POSTO", classifique como "Transporte".
-3. Se contiver "IFOOD", "MCDONALDS", "SUPERMERCADO", classifique como "Alimentação".
-4. Retorne APENAS o JSON mapeado {"ID": "CATEGORIA"}, sem nenhuma introdução, explicação ou tags markdown de código. Responda estritamente em formato JSON puro.`;
+Regras:
+1. Valores positivos → preferir "Receita" se for crédito/salário/PIX recebido.
+2. Use contexto brasileiro (Nubank, iFood, Uber, supermercados, concessionárias).
+3. Prefira categoria específica; use "Outros" só se realmente ambíguo.
+4. Sem markdown, sem texto extra — só JSON.${rulesHint}`;
 
-    const response = await fetchWithTimeout(GROQ_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
+    const response = await fetchWithTimeout(
+      GROQ_ENDPOINT,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [
+            { role: 'system', content: promptSystem },
+            {
+              role: 'user',
+              content: JSON.stringify(
+                pending.map((t) => ({
+                  id: t.id,
+                  description: anonymizePII(t.description),
+                  amount: t.amount,
+                }))
+              ),
+            },
+          ],
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+        }),
       },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          { role: 'system', content: promptSystem },
-          { role: 'user', content: JSON.stringify(transactions.map(t => ({ id: t.id, description: anonymizePII(t.description), amount: t.amount }))) }
-        ],
-        temperature: 0.1,
-        response_format: { type: 'json_object' }
-      }),
-    }, 5000);
+      8000
+    );
 
     if (!response.ok) {
       throw new Error(`Groq API returned HTTP ${response.status}`);
@@ -121,15 +171,11 @@ Regras Estritas:
       throw new Error('Groq API returned an empty completion content.');
     }
 
-    const result = JSON.parse(rawContent.trim());
-    return result;
+    const parsed = JSON.parse(rawContent.trim());
+    return finalize(parsed);
   } catch (error) {
-    console.error('[TyllerFinance AI] Groq batch categorization failed. Falling back to local Regex:', error);
-    const result: Record<string, string> = {};
-    for (const t of transactions) {
-      result[t.id] = localCategorizeMock(t.description, Number(t.amount));
-    }
-    return result;
+    console.error('[TyllerFinance AI] Groq batch categorization failed. Using local heuristics:', error);
+    return finalize({});
   }
 }
 
@@ -158,11 +204,15 @@ export async function generateContextMap(
     const amt = Number(t.amount);
     if (amt < 0) {
       const exp = Math.abs(amt);
+      const cat = String(t.category || '').trim();
+      if (cat === 'Receita') continue;
       totalExpenses += exp;
-      categoryTotals[t.category] = (categoryTotals[t.category] || 0) + exp;
+      categoryTotals[cat || 'Indefinido'] = (categoryTotals[cat || 'Indefinido'] || 0) + exp;
       
-      const cleanDesc = t.description.toUpperCase().trim().slice(0, 15);
-      descriptionCounts[cleanDesc] = (descriptionCounts[cleanDesc] || 0) + 1;
+      const cleanDesc = sanitizeMemo(t.description);
+      if (!cleanDesc) continue;
+      const label = getSuggestedIdentifier(cleanDesc) || cleanDesc;
+      descriptionCounts[label] = (descriptionCounts[label] || 0) + 1;
     }
   }
 
@@ -190,7 +240,7 @@ export async function generateContextMap(
   const mockRecurrences: string[] = [];
   for (const [desc, count] of Object.entries(descriptionCounts)) {
     if (count >= 3) {
-      mockRecurrences.push(`Transações frequentes detectadas para "${desc}" (${count} vezes).`);
+      mockRecurrences.push(`Gastos recorrentes com "${desc}" (${count} ocorrências).`);
     }
   }
   if (mockRecurrences.length === 0) {
@@ -207,18 +257,27 @@ export async function generateContextMap(
   }
 
   try {
+    const sanitizedFrequency = Object.fromEntries(
+      Object.entries(descriptionCounts).filter(([_, count]) => count >= 2)
+    );
     const summaryText = `Histórico de Transações do Workspace:
 Gasto Total: R$ ${totalExpenses.toFixed(2)} dividido em ${monthCount} meses.
 Gastos por Categoria: ${JSON.stringify(categoryTotals)}
-Transações mais frequentes: ${JSON.stringify(Object.fromEntries(Object.entries(descriptionCounts).filter(([_, count]) => count >= 2)))}
-Lista crua (amostra de descrição e data): ${JSON.stringify(transactions.slice(0, 20).map(t => ({ desc: t.description, date: t.date, amt: t.amount })))}`;
+Transações mais frequentes (sanitizadas): ${JSON.stringify(sanitizedFrequency)}
+Amostra agregada: ${JSON.stringify(
+      transactions.slice(0, 20).map((t) => ({
+        desc: anonymizePII(sanitizeMemo(t.description)),
+        date: t.date,
+        amt: t.amount,
+      }))
+    )}`;
 
     const promptSystem = `Você é o analisador comportamental do TyllerFinance.
 Sua tarefa é analisar o sumário de transações de despesas fornecido pelo usuário e gerar um perfil analítico de gastos.
 Retorne um objeto JSON puro contendo exatamente:
 1. "average_spend": Número decimal indicando a média mensal de despesas totais.
 2. "top_category": String contendo a categoria com maior despesa acumulada.
-3. "recurrence_patterns": Um array de strings (máximo 4 itens) detalhando assinaturas frequentes (Netflix, Uber, iFood) ou hábitos consolidados de despesas identificados nas descrições. Responda estritamente em português brasileiro (ex: "Frequência alta de gastos em iFood detectada").
+3. "recurrence_patterns": Um array de strings (máximo 4 itens) citando os lançamentos/estabelecimentos mais repetidos pelo nome (ex: "NUBANK", "IFOOD", "UBER") e a frequência observada. Use nomes legíveis, sem CPF. Responda em português brasileiro.
 
 Retorne APENAS o JSON mapeado, sem nenhuma introdução ou formatação adicional de markdown.`;
 
@@ -250,10 +309,31 @@ Retorne APENAS o JSON mapeado, sem nenhuma introdução ou formatação adiciona
     }
 
     const result = JSON.parse(rawContent.trim());
+    const rawPatterns: unknown[] = Array.isArray(result.recurrence_patterns)
+      ? result.recurrence_patterns
+      : mockRecurrences;
+    const recurrence_patterns = rawPatterns
+      .slice(0, 4)
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          return anonymizePII(sanitizeMemo(entry) || entry);
+        }
+        if (entry && typeof entry === 'object') {
+          const row = entry as Record<string, unknown>;
+          const raw =
+            row.label ?? row.name ?? row.merchant ?? row.description ?? row.pattern ?? row.text;
+          if (typeof raw === 'string') {
+            return anonymizePII(sanitizeMemo(raw) || raw);
+          }
+        }
+        return '';
+      })
+      .filter((p) => p.length > 0);
+
     return {
       average_spend: Number(result.average_spend) || Number(averageSpend.toFixed(2)),
       top_category: result.top_category || topCategory,
-      recurrence_patterns: result.recurrence_patterns || mockRecurrences,
+      recurrence_patterns: recurrence_patterns.length ? recurrence_patterns : mockRecurrences,
     };
   } catch (error) {
     console.error('[TyllerFinance AI] generateContextMap failed. Using PostgreSQL stats fallback:', error);
@@ -265,9 +345,19 @@ Retorne APENAS o JSON mapeado, sem nenhuma introdução ou formatação adiciona
   }
 }
 
+export interface ActionPlanProjectionContext {
+  currentBalance: number;
+  dailyExpenseAverage: number;
+  projectedEndBalance: number;
+  estimatedSavings30d: number;
+  reductionPercent: number;
+  projectionPoints?: Array<{ date: string; balance: number }>;
+}
+
 export async function generateAIActionPlan(
   economyLevel: string,
-  contextMap: any
+  contextMap: any,
+  projection?: ActionPlanProjectionContext
 ): Promise<string> {
   const averageSpend = Number(contextMap.average_spend) || 0;
   const topCategory = contextMap.top_category || 'Nenhuma';
@@ -281,12 +371,26 @@ export async function generateAIActionPlan(
     recurrencePatterns = [];
   }
 
-  const reductionPercent = economyLevel === 'leve' ? '10%' : economyLevel === 'moderado' ? '25%' : '50%';
+  const reductionPercent =
+    projection?.reductionPercent != null
+      ? `${projection.reductionPercent}%`
+      : economyLevel === 'leve'
+        ? '10%'
+        : economyLevel === 'moderado'
+          ? '25%'
+          : '50%';
 
-  // Local fallback markdown generator
-  const localPlanMock = `### ✦ Plano de Ação Estratégico: Economia ${economyLevel.toUpperCase()}
+  const balanceNow = projection?.currentBalance ?? 0;
+  const balanceEnd = projection?.projectedEndBalance ?? balanceNow;
+  const savings30d = projection?.estimatedSavings30d ?? 0;
+  const dailyAvg = projection?.dailyExpenseAverage ?? 0;
 
-Ao adotar a meta **${economyLevel.toUpperCase()}**, seu objetivo é cortar **${reductionPercent}** nas despesas supérfluas. Se mantiver esse foco, seu saldo final no fim do mês melhorará de forma substancial.
+  const localPlanMock = `### ✦ Plano de Ação: Economia ${economyLevel.toUpperCase()}
+
+Com a meta **${economyLevel.toUpperCase()}** (corte de **${reductionPercent}**), a simulação de 30 dias indica:
+- Saldo atual: **R$ ${balanceNow.toFixed(2)}**
+- Saldo projetado (dia 30): **R$ ${balanceEnd.toFixed(2)}**
+- Economia estimada no período: **R$ ${savings30d.toFixed(2)}**
 
 #### 🎯 Sugestões Práticas de Cortes:
 1. **${topCategory === 'Alimentação' ? '🍔 Alimentação' : '🏷️ Despesas Gerais'}**: Reduza em ${reductionPercent} os gastos supérfluos nesta área substituindo marcas e minimizando pedidos de delivery não planejados.
@@ -300,20 +404,31 @@ Ao adotar a meta **${economyLevel.toUpperCase()}**, seu objetivo é cortar **${r
   }
 
   try {
+    const projectionSample = (projection?.projectionPoints || []).slice(0, 8);
+
     const promptSystem = `Você é o Assistente Estratégico de IA do TyllerFinance.
-Sua tarefa é gerar um plano de ação tático de cortes em português brasileiro.
-Retorne um markdown elegante contendo:
-- Resumo em 1 frase sobre o impacto da meta selecionada no saldo final do mês.
-- 3 a 4 sugestões de cortes extremamente práticas (ex: dicas de mobilidade, alimentação, lazer e serviços) adaptadas aos dados reais do usuário fornecidos.
-- Um tom encorajador, minimalista e focado no Core Value: "Saber exatamente quanto vai sobrar no fim do mês - e o que fazer para melhorar".
+Gere um plano de ação tático em português brasileiro alinhado à simulação de fluxo de caixa de 30 dias.
+O plano DEVE usar os valores numéricos da projeção (saldo atual, saldo projetado, economia estimada).
+Retorne markdown com:
+- Título ### com a meta de economia
+- Parágrafo resumindo o impacto nos números da simulação (cite valores em R$)
+- 3 a 4 sugestões práticas de cortes por categoria/hábito
+- Tom encorajador e objetivo
 
-Restrição Estrita: Responda APENAS com o conteúdo do markdown limpo, sem cabeçalhos adicionais ou tags explicativas de markdown de código (como \`\`\`markdown).`;
+Responda APENAS markdown limpo, sem blocos \`\`\`markdown.`;
 
-    const summaryUser = `Meta desejada: Economia ${economyLevel.toUpperCase()} (corte de ${reductionPercent}).
-Histórico do Usuário:
-- Média Mensal de Gastos: R$ ${averageSpend.toFixed(2)}
-- Categoria Principal: ${topCategory}
-- Hábitos e recorrências identificados: ${JSON.stringify(recurrencePatterns)}`;
+    const summaryUser = `Meta: Economia ${economyLevel.toUpperCase()} (redução ${reductionPercent}).
+Simulação Tendência de Fluxo de Caixa (30 dias):
+- Saldo atual: R$ ${balanceNow.toFixed(2)}
+- Gasto médio diário (base): R$ ${dailyAvg.toFixed(2)}
+- Saldo projetado no dia 30: R$ ${balanceEnd.toFixed(2)}
+- Economia estimada vs. sem meta: R$ ${savings30d.toFixed(2)}
+- Amostra da curva projetada: ${JSON.stringify(projectionSample)}
+
+Perfil de gastos:
+- Média mensal histórica: R$ ${averageSpend.toFixed(2)}
+- Categoria principal: ${topCategory}
+- Recorrências: ${JSON.stringify(recurrencePatterns)}`;
 
     const response = await fetchWithTimeout(GROQ_ENDPOINT, {
       method: 'POST',

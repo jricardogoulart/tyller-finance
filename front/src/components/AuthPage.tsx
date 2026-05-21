@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { Button, InputField } from './ComponentsSection';
+import { Checkbox } from './ui/Checkbox';
 
 export function AuthPage() {
   const { login, signup, error, clearError } = useAuth();
@@ -265,19 +266,13 @@ export function AuthPage() {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="flex items-start gap-2"
+                className="flex items-start gap-2 mt-1"
               >
-                <input
-                  type="checkbox"
-                  id="terms"
+                <Checkbox
                   checked={termsAccepted}
-                  onChange={(e) => setTermsAccepted(e.target.checked)}
-                  required
-                  className="mt-1"
+                  onChange={(checked) => setTermsAccepted(checked)}
+                  label="Eu concordo com os Termos de Uso e Política de Privacidade de IA (LGPD)."
                 />
-                <label htmlFor="terms" className="text-xs text-neutral-400 font-body">
-                  Eu concordo com os Termos de Uso e Política de Privacidade de IA (LGPD).
-                </label>
               </motion.div>
             )}
 

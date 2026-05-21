@@ -5,9 +5,19 @@ import pdfParse from 'pdf-parse';
 import crypto from 'crypto';
 import { pool } from '../db';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
-import { classifyTransaction, ClassificationRule } from '../utils/TransactionClassifier';
+import {
+  classifyTransaction,
+  ClassificationRule,
+  needsAICategorization,
+  normalizeCategory,
+  lookupHistoricalCategory,
+  getSuggestedIdentifier,
+  sanitizeMemo,
+  toPublicTransactionRow,
+} from '../utils/TransactionClassifier';
 import { categorizeTransactionsBatch } from '../utils/groq';
 import { runAccuracyAnalysis } from '../services/accuracyAnalysis';
+import { autoCategorizeWorkspace } from '../services/autoCategorize';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -170,45 +180,62 @@ router.post('/parse', authMiddleware, upload.single('file'), async (req: Authent
       return res.status(400).json({ error: 'Formato de arquivo inválido. Apenas OFX e PDF são suportados.' });
     }
 
-    // AI Fallback for PENDENTE_CLASSIFICACAO, Não Categorizado, Outros and empty categories
-    const pendingTransactions = rawTransactions.filter(tx => 
-      tx.category === 'PENDENTE_CLASSIFICACAO' || 
-      tx.category === 'Não Categorizado' || 
-      tx.category === 'Outros' || 
-      !tx.category
-    );
+    // Histórico do workspace: reutiliza categoria de transações similares já classificadas
+    for (const tx of rawTransactions) {
+      if (!needsAICategorization(tx.category)) continue;
+
+      const historical = await lookupHistoricalCategory(
+        pool,
+        workspaceId,
+        tx.clean_memo || tx.description,
+        tx.suggested_identifier
+      );
+      if (historical) {
+        tx.category = historical;
+      }
+    }
+
+    // IA apenas para o que ainda ficou incerto (cascata local + regras do usuário no prompt)
+    const pendingTransactions = rawTransactions.filter((tx) => needsAICategorization(tx.category));
 
     if (pendingTransactions.length > 0) {
       const itemsToCategorize = pendingTransactions.map((tx, idx) => ({
         id: `temp_${idx}`,
         description: tx.clean_memo || tx.description,
-        amount: tx.amount
+        amount: tx.amount,
       }));
 
-      const aiResults = await categorizeTransactionsBatch(itemsToCategorize);
+      const aiResults = await categorizeTransactionsBatch(itemsToCategorize, {
+        userRules: userRules.map((r) => ({
+          search_token: r.search_token,
+          category: r.category,
+        })),
+      });
 
       for (let i = 0; i < pendingTransactions.length; i++) {
         const tx = pendingTransactions[i];
-        const newCategory = aiResults[`temp_${i}`];
+        const newCategory = normalizeCategory(aiResults[`temp_${i}`]);
 
-        if (newCategory && newCategory !== 'Outros' && newCategory !== 'PENDENTE_CLASSIFICACAO') {
+        if (!needsAICategorization(newCategory)) {
           tx.category = newCategory;
 
-          // Auto-learn rule
-          await pool.query(
-            `INSERT INTO transaction_rules (workspace_id, search_token, category, subcategory, priority, transaction_type, origin)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (workspace_id, search_token) DO NOTHING`,
-            [
-              workspaceId,
-              tx.clean_memo,
-              newCategory,
-              'AUTO_AI',
-              50, // Mid priority for AI learned rules
-              tx.amount < 0 ? 'DEBIT' : 'CREDIT',
-              'AUTO_AI'
-            ]
-          );
+          const learnToken = tx.suggested_identifier || tx.clean_memo;
+          if (learnToken) {
+            await pool.query(
+              `INSERT INTO transaction_rules (workspace_id, search_token, category, subcategory, priority, transaction_type, origin)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               ON CONFLICT (workspace_id, search_token) DO NOTHING`,
+              [
+                workspaceId,
+                learnToken,
+                newCategory,
+                'AUTO_AI',
+                50,
+                tx.amount < 0 ? 'DEBIT' : 'CREDIT',
+                'AUTO_AI',
+              ]
+            );
+          }
         }
       }
     }
@@ -305,6 +332,16 @@ router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Re
 
     await client.query('COMMIT');
 
+    let autoCategorizedCount = 0;
+    if (insertedCount > 0) {
+      try {
+        const catResult = await autoCategorizeWorkspace(client, workspaceId);
+        autoCategorizedCount = catResult.categorizedCount;
+      } catch (catError) {
+        console.error('[TyllerFinance] Auto-categorização pós-import falhou (não crítico):', catError);
+      }
+    }
+
     // Trigger de acurácia automático (não bloqueia o import)
     try {
       const activePlanResult = await pool.query(
@@ -334,6 +371,7 @@ router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Re
       message: 'Importação concluída com sucesso.',
       importedCount: insertedCount,
       skippedCount: transactions.length - insertedCount,
+      autoCategorizedCount,
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -367,7 +405,19 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
       [workspaceId]
     );
 
-    return res.status(200).json({ transactions: result.rows });
+    const transactions = result.rows.map((row) => {
+      const hydrated = { ...row };
+      if (row.original_memo) {
+        const refreshedClean = sanitizeMemo(row.original_memo);
+        if (refreshedClean) {
+          hydrated.clean_memo = refreshedClean;
+          hydrated.description = refreshedClean;
+          hydrated.suggested_identifier = getSuggestedIdentifier(refreshedClean);
+        }
+      }
+      return toPublicTransactionRow(hydrated);
+    });
+    return res.status(200).json({ transactions });
   } catch (error) {
     console.error('Error fetching transactions:', error);
     return res.status(500).json({ error: 'Erro ao listar as transações.' });

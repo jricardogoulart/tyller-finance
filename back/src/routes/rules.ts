@@ -92,7 +92,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       `UPDATE transactions 
        SET category = $1 
        WHERE workspace_id = $2 
-         AND (clean_memo ILIKE $3 OR description ILIKE $3 OR original_memo ILIKE $3)`,
+         AND (clean_memo ILIKE $3 OR description ILIKE $3)`,
       [category, workspaceId, searchPattern]
     );
 
@@ -250,7 +250,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
       `UPDATE transactions 
        SET category = $1 
        WHERE workspace_id = $2 
-         AND (clean_memo ILIKE $3 OR description ILIKE $3 OR original_memo ILIKE $3)`,
+         AND (clean_memo ILIKE $3 OR description ILIKE $3)`,
       [category, workspaceId, searchPattern]
     );
 

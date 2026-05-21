@@ -885,3 +885,420 @@ input[type="number"] {
 .btn-tech-outline:active:not(:disabled) {
   transform: scale(0.97);
 }
+
+/* ============================================================
+   DESIGN SYSTEM — SURFACE & CARD PRIMITIVES
+   Used by app screens (not ad-hoc Tailwind slate/amber palettes)
+   ============================================================ */
+
+.ds-glass-card,
+.bg-glass-card {
+  background: linear-gradient(
+    135deg,
+    rgba(20, 23, 18, 0.76) 0%,
+    rgba(10, 12, 9, 0.86) 100%
+  );
+  backdrop-filter: blur(32px) saturate(135%);
+  -webkit-backdrop-filter: blur(32px) saturate(135%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.border-glass {
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.ds-card-inset {
+  background-color: var(--color-neutral-900);
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-xl);
+}
+
+.ds-segment-tabs {
+  border-bottom: 1px solid var(--color-neutral-800);
+}
+
+.ds-segment-tab {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xl);
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-neutral-400);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.ds-segment-tab:hover:not(.ds-segment-tab-active) {
+  color: var(--color-neutral-200);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.ds-segment-tab-active {
+  color: var(--color-brand-400);
+  background: linear-gradient(
+    90deg,
+    rgba(190, 240, 48, 0.12) 0%,
+    rgba(168, 217, 24, 0.08) 100%
+  );
+  border-color: var(--color-brand-800);
+}
+
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-full);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--letter-spacing-wide);
+  border: 1px solid transparent;
+}
+
+.ds-badge::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.ds-badge-brand {
+  background-color: var(--color-brand-900);
+  color: var(--color-brand-300);
+  border-color: var(--color-brand-800);
+}
+
+.ds-badge-success {
+  background-color: var(--color-success-950);
+  color: var(--color-success-500);
+  border-color: var(--color-success-700);
+}
+
+.ds-badge-warning {
+  background-color: var(--color-warning-950);
+  color: var(--color-warning-500);
+  border-color: var(--color-warning-700);
+}
+
+.ds-badge-error {
+  background-color: var(--color-error-950);
+  color: var(--color-error-500);
+  border-color: var(--color-error-700);
+}
+
+.ds-badge-info {
+  background-color: var(--color-info-950);
+  color: var(--color-info-500);
+  border-color: var(--color-info-700);
+}
+
+.ds-badge-neutral {
+  background-color: var(--color-neutral-900);
+  color: var(--color-neutral-400);
+  border-color: var(--color-neutral-700);
+}
+
+.ds-icon-tile {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-brand-950);
+  border: 1px solid var(--color-brand-900);
+  color: var(--color-brand-400);
+}
+
+.ds-stat-label {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-400);
+}
+
+.ds-stat-value {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-neutral-100);
+}
+
+.ds-stat-value-brand {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-brand-400);
+}
+
+.ds-card-title {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-neutral-100);
+}
+
+.ds-card-subtitle {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-400);
+}
+
+.ds-progress-track {
+  width: 100%;
+  height: 0.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-neutral-800);
+  overflow: hidden;
+}
+
+.ds-progress-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--color-brand-500), var(--color-brand-400));
+}
+
+.ds-empty-state {
+  text-align: center;
+  padding: var(--space-12) var(--space-4);
+}
+
+.ds-empty-state-icon {
+  width: 4rem;
+  height: 4rem;
+  margin: 0 auto var(--space-4);
+  border-radius: var(--radius-full);
+  background-color: var(--color-neutral-850);
+  border: 1px solid var(--color-neutral-800);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-neutral-500);
+}
+
+.ds-empty-state-title {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-400);
+  margin-bottom: var(--space-4);
+}
+
+.ds-empty-state-desc {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-500);
+}
+
+.ds-timeline-line {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 1px;
+  background-color: var(--color-neutral-800);
+}
+
+.ds-timeline-dot {
+  position: absolute;
+  left: -1.5rem;
+  top: 1.25rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--color-brand-500), var(--color-brand-400));
+  border: 2px solid var(--color-neutral-950);
+}
+
+.ds-timeline-card {
+  background-color: var(--color-neutral-900);
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+.ds-timeline-card-header {
+  width: 100%;
+  padding: var(--space-4);
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-default);
+}
+
+.ds-timeline-card-header:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.ds-markdown-h3 {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-neutral-100);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.ds-markdown-h4 {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-brand-400);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.ds-markdown-p {
+  font-family: var(--font-family-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-300);
+  line-height: var(--line-height-relaxed);
+  margin: var(--space-2) 0;
+}
+
+.ds-markdown-list-item {
+  padding-left: var(--space-4);
+  margin: 0.625rem 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-300);
+  border-left: 2px solid var(--color-brand-800);
+  line-height: var(--line-height-relaxed);
+}
+
+.ds-markdown-list-num {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-brand-400);
+}
+
+.ds-markdown-footnote {
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-neutral-500);
+  text-align: center;
+  margin-top: var(--space-4);
+}
+
+.ds-report-section-title {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-2);
+}
+
+.ds-report-section-title-success { color: var(--color-success-500); }
+.ds-report-section-title-warning { color: var(--color-warning-500); }
+.ds-report-section-title-brand { color: var(--color-brand-300); }
+
+.ds-report-list {
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-300);
+}
+
+.ds-report-list li + li {
+  margin-top: var(--space-1);
+}
+
+.ds-report-deviation {
+  font-size: var(--font-size-xs);
+  background-color: var(--color-neutral-850);
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+}
+
+.btn-glass-premium {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-neutral-800);
+  color: var(--color-neutral-200);
+  font-family: var(--font-family-body);
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.btn-glass-premium:hover:not(:disabled) {
+  border-color: var(--color-brand-700);
+  color: var(--color-brand-300);
+  background: rgba(190, 240, 48, 0.06);
+}
+
+.btn-danger-ghost {
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-error-950);
+  border: 1px solid var(--color-error-700);
+  color: var(--color-error-500);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-default);
+}
+
+.btn-danger-ghost:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+/* ============================================================
+   PREMIUM GLASSMORPHISM STYLING OVERRIDES
+   Enhances all glass components to feel like realistic,
+   thick, physical frosted glass.
+   ============================================================ */
+
+/* 1. Backdrop Blur Upgrades (more refraction) */
+.backdrop-blur-sm {
+  backdrop-filter: blur(12px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
+}
+
+.backdrop-blur-md {
+  backdrop-filter: blur(20px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(125%) !important;
+}
+
+.backdrop-blur-lg {
+  backdrop-filter: blur(28px) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(130%) !important;
+}
+
+.backdrop-blur-xl {
+  backdrop-filter: blur(36px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(36px) saturate(135%) !important;
+}
+
+.backdrop-blur-2xl {
+  backdrop-filter: blur(48px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(140%) !important;
+}
+
+/* 2. Glassmorphism Card Backdrops (more opaque + specular reflections) */
+[class*="bg-neutral-900"][class*="backdrop-blur-"],
+[class*="bg-neutral-950"][class*="backdrop-blur-"],
+[class*="bg-black"][class*="backdrop-blur-"]:not(.absolute),
+.glass-premium {
+  background-color: rgba(20, 23, 18, 0.78) !important;
+  box-shadow: 
+    0 12px 40px 0 rgba(0, 0, 0, 0.5),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+[class*="border-neutral-800"] {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+}
+
+/* Dedicated custom glass helper class */
+.glass-premium {
+  background: linear-gradient(
+    135deg,
+    rgba(20, 23, 18, 0.76) 0%,
+    rgba(10, 12, 9, 0.86) 100%
+  ) !important;
+  backdrop-filter: blur(32px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(135%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 
+    0 12px 40px 0 rgba(0, 0, 0, 0.55),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.1) !important;
+}

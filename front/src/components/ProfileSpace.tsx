@@ -31,7 +31,7 @@ const cardVariants: Variants = {
 export function ProfileSpace() {
   const { user, updateProfile, exportData, deleteAccount } = useAuth();
   const [activeTab, setActiveTab] = useState<'dados' | 'seguranca' | 'privacidade'>('dados');
-  
+
   // Name Edit States
   const [name, setName] = useState(user?.name || '');
   const [updatingName, setUpdatingName] = useState(false);
@@ -225,31 +225,28 @@ export function ProfileSpace() {
         >
           <button
             onClick={() => setActiveTab('dados')}
-            className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'dados'
+            className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === 'dados'
                 ? 'bg-neutral-800 text-neutral-100 shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             Meus Dados
           </button>
           <button
             onClick={() => setActiveTab('seguranca')}
-            className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'seguranca'
+            className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === 'seguranca'
                 ? 'bg-neutral-800 text-neutral-100 shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             Segurança
           </button>
           <button
             onClick={() => setActiveTab('privacidade')}
-            className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'privacidade'
+            className={`px-4 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === 'privacidade'
                 ? 'bg-neutral-800 text-neutral-100 shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200'
-            }`}
+              }`}
           >
             Privacidade & LGPD
           </button>
@@ -354,7 +351,7 @@ export function ProfileSpace() {
                 </Button>
               </div>
             </form>
-          ) : (
+          ) : activeTab === 'seguranca' ? (
             <form onSubmit={handleUpdatePassword} className="space-y-6">
               <h3
                 className="text-xs uppercase tracking-widest font-mono border-b border-neutral-800/60 pb-3"
@@ -453,107 +450,102 @@ export function ProfileSpace() {
               </div>
             </form>
           ) : activeTab === 'privacidade' ? (
-            <div className="space-y-6">
-              <h3
-                className="text-xs uppercase tracking-widest font-mono border-b border-neutral-800/60 pb-3"
-                style={{ color: "var(--color-neutral-400)", letterSpacing: "var(--letter-spacing-widest)" }}
+          <div className="space-y-6">
+            <h3
+              className="text-xs uppercase tracking-widest font-mono border-b border-neutral-800/60 pb-3"
+              style={{ color: "var(--color-neutral-400)", letterSpacing: "var(--letter-spacing-widest)" }}
+            >
+              Privacidade de Dados & LGPD
+            </h3>
+
+            <AnimatePresence>
+              {privacyAlert && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <Alert
+                    variant={privacyAlert.type}
+                    title={privacyAlert.type === 'success' ? 'Operação concluída' : 'Atenção'}
+                    description={privacyAlert.message}
+                    visible={true}
+                    onClose={() => setPrivacyAlert(null)}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Data Portability Section */}
+            <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <h4 className="text-sm font-semibold text-neutral-200">Exportação de Dados</h4>
+                <p className="text-xs text-neutral-400 mt-1 max-w-md">
+                  Baixe uma cópia completa dos seus dados armazenados (transações, contexto de IA, regras e perfil) em formato JSON.
+                </p>
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                onClick={handleExportData}
+                disabled={isExporting}
               >
-                Privacidade de Dados & LGPD
-              </h3>
+                {isExporting ? 'Processando...' : 'Exportar Dados (JSON)'}
+              </Button>
+            </div>
 
-              <AnimatePresence>
-                {privacyAlert && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <Alert
-                      variant={privacyAlert.type}
-                      title={privacyAlert.type === 'success' ? 'Operação concluída' : 'Atenção'}
-                      description={privacyAlert.message}
-                      visible={true}
-                      onClose={() => setPrivacyAlert(null)}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+            {/* AI Consent Management Section */}
+            <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mt-4">
+              <div>
+                <h4 className="text-sm font-semibold text-neutral-200">Uso de Dados pela Inteligência Artificial</h4>
+                <p className="text-xs text-neutral-400 mt-1 max-w-md">
+                  {user?.terms_accepted
+                    ? 'A IA está ativa. Seus dados de despesas (já anonimizados, sem CPFs ou e-mails) são processados para gerar categorizações e insights preditivos.'
+                    : 'Consentimento revogado. A inteligência artificial preditiva está suspensa para sua conta e dependerá de categorização manual.'}
+                </p>
+              </div>
+              <Button
+                variant={user?.terms_accepted ? "secondary" : "primary"}
+                size="sm"
+                type="button"
+                onClick={handleToggleConsent}
+                disabled={isTogglingConsent}
+              >
+                {isTogglingConsent ? 'Atualizando...' : user?.terms_accepted ? 'Revogar Consentimento' : 'Permitir Análise de IA'}
+              </Button>
+            </div>
 
-              {/* Data Portability Section */}
-              <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-sm font-semibold text-neutral-200">Exportação de Dados</h4>
-                  <p className="text-xs text-neutral-400 mt-1 max-w-md">
-                    Baixe uma cópia completa dos seus dados armazenados (transações, contexto de IA, regras e perfil) em formato JSON.
-                  </p>
+            {/* Account Deletion Section (Danger Zone) */}
+            <div className="p-4 rounded-xl border border-red-900/50 bg-red-950/10 flex flex-col gap-4 mt-6">
+              <div>
+                <h4 className="text-sm font-semibold text-red-400">Excluir Conta Permanentemente</h4>
+                <p className="text-xs text-red-300/80 mt-1 max-w-xl">
+                  Esta ação é irreversível. Todos os seus dados, histórico, modelos de IA e preferências serão apagados imediatamente do nosso banco de dados.
+                </p>
+              </div>
+              <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
+                <div className="w-full md:w-64">
+                  <InputField
+                    type="text"
+                    placeholder="Digite DELETAR"
+                    value={deleteInput}
+                    onChange={(e) => setDeleteInput(e.target.value)}
+                  />
                 </div>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant={deleteInput === 'DELETAR' ? 'danger' : 'secondary'}
+                  size="md"
                   type="button"
-                  onClick={handleExportData}
-                  disabled={isExporting}
+                  onClick={handleDeleteAccount}
+                  disabled={isDeleting || deleteInput !== 'DELETAR'}
                 >
-                  {isExporting ? 'Processando...' : 'Exportar Dados (JSON)'}
+                  {isDeleting ? 'Excluindo...' : 'Excluir Minha Conta'}
                 </Button>
-              </div>
-
-              {/* AI Consent Management Section */}
-              <div className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mt-4">
-                <div>
-                  <h4 className="text-sm font-semibold text-neutral-200">Uso de Dados pela Inteligência Artificial</h4>
-                  <p className="text-xs text-neutral-400 mt-1 max-w-md">
-                    {user?.terms_accepted 
-                      ? 'A IA está ativa. Seus dados de despesas (já anonimizados, sem CPFs ou e-mails) são processados para gerar categorizações e insights preditivos.' 
-                      : 'Consentimento revogado. A inteligência artificial preditiva está suspensa para sua conta e dependerá de categorização manual.'}
-                  </p>
-                </div>
-                <Button
-                  variant={user?.terms_accepted ? "secondary" : "primary"}
-                  size="sm"
-                  type="button"
-                  onClick={handleToggleConsent}
-                  disabled={isTogglingConsent}
-                >
-                  {isTogglingConsent ? 'Atualizando...' : user?.terms_accepted ? 'Revogar Consentimento' : 'Permitir Análise de IA'}
-                </Button>
-              </div>
-
-              {/* Account Deletion Section (Danger Zone) */}
-              <div className="p-4 rounded-xl border border-red-900/50 bg-red-950/10 flex flex-col gap-4 mt-6">
-                <div>
-                  <h4 className="text-sm font-semibold text-red-400">Excluir Conta Permanentemente</h4>
-                  <p className="text-xs text-red-300/80 mt-1 max-w-xl">
-                    Esta ação é irreversível. Todos os seus dados, histórico, modelos de IA e preferências serão apagados imediatamente do nosso banco de dados.
-                  </p>
-                </div>
-                <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
-                  <div className="w-full md:w-64">
-                    <InputField
-                      type="text"
-                      placeholder="Digite DELETAR"
-                      value={deleteInput}
-                      onChange={(e) => setDeleteInput(e.target.value)}
-                    />
-                  </div>
-                  <Button
-                    variant="primary"
-                    size="md"
-                    type="button"
-                    onClick={handleDeleteAccount}
-                    disabled={isDeleting || deleteInput !== 'DELETAR'}
-                    style={{
-                      backgroundColor: deleteInput === 'DELETAR' ? 'var(--color-danger-500)' : 'var(--color-neutral-800)',
-                      color: deleteInput === 'DELETAR' ? 'white' : 'var(--color-neutral-400)',
-                      opacity: deleteInput === 'DELETAR' ? 1 : 0.5
-                    }}
-                  >
-                    {isDeleting ? 'Excluindo...' : 'Excluir Minha Conta'}
-                  </Button>
-                </div>
               </div>
             </div>
+          </div>
           ) : null}
         </motion.div>
       </AnimatePresence>
