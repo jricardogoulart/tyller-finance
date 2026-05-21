@@ -68,6 +68,12 @@ export async function initDb() {
       );
     `);
 
+    // Ensure file_hash column exists for duplicate detection
+    await client.query(`
+      ALTER TABLE file_uploads
+      ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);
+    `);
+
     // Create transactions table
     await client.query(`
       CREATE TABLE IF NOT EXISTS transactions (
@@ -88,10 +94,11 @@ export async function initDb() {
 
     // Ensure new columns exist for existing databases
     await client.query(`
-      ALTER TABLE transactions 
+      ALTER TABLE transactions
       ADD COLUMN IF NOT EXISTS original_memo TEXT,
       ADD COLUMN IF NOT EXISTS clean_memo TEXT,
-      ADD COLUMN IF NOT EXISTS suggested_identifier VARCHAR(255);
+      ADD COLUMN IF NOT EXISTS suggested_identifier VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS file_upload_id UUID REFERENCES file_uploads(id) ON DELETE CASCADE;
     `);
 
     // Create transaction_rules table
