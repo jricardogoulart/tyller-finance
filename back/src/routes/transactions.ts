@@ -7,6 +7,7 @@ import { pool } from '../db';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { classifyTransaction, ClassificationRule } from '../utils/TransactionClassifier';
 import { categorizeTransactionsBatch } from '../utils/groq';
+import { runAccuracyAnalysis } from '../services/accuracyAnalysis';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -303,6 +304,31 @@ router.post('/import', authMiddleware, async (req: AuthenticatedRequest, res: Re
     }
 
     await client.query('COMMIT');
+
+    // Trigger de acurácia automático (não bloqueia o import)
+    try {
+      const activePlanResult = await pool.query(
+        'SELECT id, created_at FROM action_plans WHERE workspace_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 1',
+        [workspaceId, 'Ativo']
+      );
+
+      if (activePlanResult.rows.length > 0) {
+        const activePlan = activePlanResult.rows[0];
+        const planCreatedAt = new Date(activePlan.created_at);
+        const periodStart = planCreatedAt.toISOString().split('T')[0];
+        const periodEnd = new Date().toISOString().split('T')[0];
+
+        const accuracyClient = await pool.connect();
+        try {
+          await runAccuracyAnalysis(accuracyClient, workspaceId, activePlan.id, periodStart, periodEnd);
+          console.log('[TyllerFinance] Análise de acurácia concluída para plano:', activePlan.id);
+        } finally {
+          accuracyClient.release();
+        }
+      }
+    } catch (accuracyError) {
+      console.error('[TyllerFinance] Erro ao disparar análise de acurácia (não crítico):', accuracyError);
+    }
 
     return res.status(200).json({
       message: 'Importação concluída com sucesso.',

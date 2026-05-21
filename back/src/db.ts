@@ -162,6 +162,14 @@ export async function initDb() {
       );
     `);
 
+    await client.query(`
+      ALTER TABLE action_plans
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Ativo',
+      ADD COLUMN IF NOT EXISTS accuracy_report TEXT,
+      ADD COLUMN IF NOT EXISTS plan_period_start DATE,
+      ADD COLUMN IF NOT EXISTS plan_period_end DATE;
+    `);
+
     console.log('PostgreSQL database schema initialized successfully.');
   } catch (error) {
     console.error('Error initializing database schema:', error);

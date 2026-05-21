@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { pool } from '../db';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { categorizeTransactionsBatch, generateContextMap, generateAIActionPlan } from '../utils/groq';
+import { runAccuracyAnalysis } from '../services/accuracyAnalysis';
 
 const router = Router();
 
@@ -435,12 +436,20 @@ router.post('/action-plans', authMiddleware, async (req: AuthenticatedRequest, r
 
     const targetSaving = Number((averageSpend * economyFactor).toFixed(2));
 
+    await pool.query(
+      `UPDATE action_plans SET status = 'Arquivado'
+       WHERE workspace_id = $1 AND status = 'Ativo'`,
+      [workspaceId]
+    );
+
+    const periodStart = new Date().toISOString().split('T')[0];
+
     // 4. Inserir o plano na tabela action_plans
     const insertResult = await pool.query(
-      `INSERT INTO action_plans (workspace_id, economy_level, plan_content, target_saving, actual_saving, adherence_score)
-       VALUES ($1, $2, $3, $4, NULL, NULL)
+      `INSERT INTO action_plans (workspace_id, economy_level, plan_content, target_saving, actual_saving, adherence_score, status, plan_period_start)
+       VALUES ($1, $2, $3, $4, NULL, NULL, 'Ativo', $5)
        RETURNING *`,
-      [workspaceId, economyLevel, planContent, targetSaving]
+      [workspaceId, economyLevel, planContent, targetSaving, periodStart]
     );
 
     return res.status(201).json(insertResult.rows[0]);
@@ -478,7 +487,9 @@ router.get('/action-plans/history', authMiddleware, async (req: AuthenticatedReq
 
     // 3. Buscar todos os planos da tabela action_plans
     const plansResult = await pool.query(
-      'SELECT id, workspace_id, economy_level, plan_content, created_at, target_saving FROM action_plans WHERE workspace_id = $1 ORDER BY created_at DESC',
+      `SELECT id, workspace_id, economy_level, plan_content, created_at, target_saving,
+              status, accuracy_report, plan_period_start, plan_period_end
+       FROM action_plans WHERE workspace_id = $1 ORDER BY created_at DESC`,
       [workspaceId]
     );
     const plans = plansResult.rows;
@@ -559,6 +570,10 @@ router.get('/action-plans/history', authMiddleware, async (req: AuthenticatedReq
 
       populatedPlans.push({
         ...plan,
+        status: plan.status || 'Ativo',
+        accuracy_report: plan.accuracy_report || null,
+        plan_period_start: plan.plan_period_start || null,
+        plan_period_end: plan.plan_period_end || null,
         target_saving: parseFloat(plan.target_saving) || 0,
         actual_saving: actualSavingFormatted,
         adherence_score: adherenceScoreFormatted,
@@ -570,6 +585,49 @@ router.get('/action-plans/history', authMiddleware, async (req: AuthenticatedReq
   } catch (error) {
     console.error('[TyllerFinance Backend] Error in GET /api/ai/action-plans/history:', error);
     return res.status(500).json({ error: 'Erro ao buscar o histórico de planos.' });
+  }
+});
+
+// POST /api/ai/accuracy-analysis - Analisa acurácia de um plano ativo vs extrato real
+router.post('/accuracy-analysis', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<any> => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Não autorizado.' });
+  }
+
+  const { planId, periodStart, periodEnd } = req.body;
+
+  if (!planId || !periodStart || !periodEnd) {
+    return res.status(400).json({ error: 'planId, periodStart e periodEnd são obrigatórios.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const workspaceResult = await client.query(
+      'SELECT id FROM workspaces WHERE user_id = $1 LIMIT 1',
+      [req.user.id]
+    );
+
+    if (workspaceResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Workspace não encontrado.' });
+    }
+
+    const workspaceId = workspaceResult.rows[0].id;
+    const result = await runAccuracyAnalysis(client, workspaceId, planId, periodStart, periodEnd);
+
+    if (!result.ok) {
+      return res.status(404).json({ error: 'Plano ativo não encontrado ou sem transações no período.' });
+    }
+
+    return res.status(200).json({
+      message: 'Análise de acurácia concluída.',
+      planId,
+      report: result.report,
+    });
+  } catch (error) {
+    console.error('[TyllerFinance Backend] Error in /api/ai/accuracy-analysis:', error);
+    return res.status(500).json({ error: 'Erro ao processar análise de acurácia.' });
+  } finally {
+    client.release();
   }
 });
 

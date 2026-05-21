@@ -6,6 +6,23 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.1-8b-instant';
 
+/**
+ * Helper to fetch with an explicit timeout using AbortController.
+ */
+async function fetchWithTimeout(url: string, options: any, timeoutMs = 5000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 // Local categorizer regex mock for absolute resiliency
 export function localCategorizeMock(description: string, amount: number): string {
   const desc = description.toUpperCase();
@@ -77,7 +94,7 @@ Regras Estritas:
 3. Se contiver "IFOOD", "MCDONALDS", "SUPERMERCADO", classifique como "Alimentação".
 4. Retorne APENAS o JSON mapeado {"ID": "CATEGORIA"}, sem nenhuma introdução, explicação ou tags markdown de código. Responda estritamente em formato JSON puro.`;
 
-    const response = await fetch(GROQ_ENDPOINT, {
+    const response = await fetchWithTimeout(GROQ_ENDPOINT, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${GROQ_API_KEY}`,
@@ -92,7 +109,7 @@ Regras Estritas:
         temperature: 0.1,
         response_format: { type: 'json_object' }
       }),
-    });
+    }, 5000);
 
     if (!response.ok) {
       throw new Error(`Groq API returned HTTP ${response.status}`);
@@ -205,7 +222,7 @@ Retorne um objeto JSON puro contendo exatamente:
 
 Retorne APENAS o JSON mapeado, sem nenhuma introdução ou formatação adicional de markdown.`;
 
-    const response = await fetch(GROQ_ENDPOINT, {
+    const response = await fetchWithTimeout(GROQ_ENDPOINT, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${GROQ_API_KEY}`,
@@ -220,7 +237,7 @@ Retorne APENAS o JSON mapeado, sem nenhuma introdução ou formatação adiciona
         temperature: 0.2,
         response_format: { type: 'json_object' }
       }),
-    });
+    }, 5000);
 
     if (!response.ok) {
       throw new Error(`Groq API returned HTTP ${response.status}`);
@@ -298,7 +315,7 @@ Histórico do Usuário:
 - Categoria Principal: ${topCategory}
 - Hábitos e recorrências identificados: ${JSON.stringify(recurrencePatterns)}`;
 
-    const response = await fetch(GROQ_ENDPOINT, {
+    const response = await fetchWithTimeout(GROQ_ENDPOINT, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${GROQ_API_KEY}`,
@@ -312,7 +329,7 @@ Histórico do Usuário:
         ],
         temperature: 0.3,
       }),
-    });
+    }, 5000);
 
     if (!response.ok) throw new Error('Groq returned error');
     
@@ -321,6 +338,93 @@ Histórico do Usuário:
   } catch (error) {
     console.error('[TyllerFinance AI] generateAIActionPlan failed. Using local fallback:', error);
     return localPlanMock;
+  }
+}
+
+const ACCURACY_FALLBACK = JSON.stringify({
+  score: 0,
+  metasCumpridas: [],
+  desvios: [],
+  instrucoesProximoPlano: ['Análise indisponível — gere um novo plano após importar mais extratos.'],
+});
+
+export async function generateAccuracyReport(
+  planContent: string,
+  realTransactions: Array<{ category: string; amount: number; date: string }>,
+  periodStart: string,
+  periodEnd: string
+): Promise<string> {
+  const categoryBreakdown: Record<string, number> = {};
+  let totalSpent = 0;
+
+  for (const tx of realTransactions) {
+    const category = tx.category || 'Não Categorizado';
+    const amount = Math.abs(Number(tx.amount));
+    categoryBreakdown[category] = (categoryBreakdown[category] || 0) + amount;
+    totalSpent += amount;
+  }
+
+  const categoryText =
+    totalSpent > 0
+      ? Object.entries(categoryBreakdown)
+          .map(
+            ([cat, val]) =>
+              `- ${cat}: R$ ${val.toFixed(2)} (${((val / totalSpent) * 100).toFixed(1)}%)`
+          )
+          .join('\n')
+      : '- Nenhum gasto registrado no período';
+
+  const prompt = `Você é um analista financeiro especializado. Compare as metas do Plano de Ação com os gastos reais do período.
+
+PLANO DE AÇÃO ORIGINAL:
+${planContent}
+
+GASTOS REAIS POR CATEGORIA (período: ${periodStart} a ${periodEnd}):
+Total gasto: R$ ${totalSpent.toFixed(2)}
+${categoryText}
+
+Gere um relatório estruturado em JSON com:
+1. "score": número de 0 a 100 representando a acurácia geral (100 = metas cumpridas perfeitamente)
+2. "metasCumpridas": array de strings com metas que foram atingidas
+3. "desvios": array de objetos {categoria: string, valorEsperado: number, valorReal: number, percentualDesvio: number}
+4. "instrucoesProximoPlano": array de strings com recomendações específicas para o próximo plano
+
+Retorne APENAS o JSON, sem texto adicional.`;
+
+  if (!GROQ_API_KEY) {
+    return ACCURACY_FALLBACK;
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      GROQ_ENDPOINT,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 2000,
+        }),
+      },
+      30000
+    );
+
+    if (!response.ok) {
+      throw new Error(`Groq API error: ${response.statusText}`);
+    }
+
+    const data: any = await response.json();
+    const raw = data.choices?.[0]?.message?.content?.trim() || ACCURACY_FALLBACK;
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    return jsonMatch ? jsonMatch[0] : raw;
+  } catch (error) {
+    console.error('[TyllerFinance AI] generateAccuracyReport failed:', error);
+    return ACCURACY_FALLBACK;
   }
 }
 
