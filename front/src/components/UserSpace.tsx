@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import api, { createTransactionRule, fetchRules, deleteRule, approveRule, updateRule } from '../utils/api';
+import api, { createTransactionRule, fetchRules, deleteRule, approveRule, updateRule, deleteUpload } from '../utils/api';
 import { CategoryBadge } from './CategoryBadge';
 import { CATEGORIES_LIST } from '../utils/categories';
 import { useAuth } from '../context/AuthContext';
@@ -75,6 +75,9 @@ export function UserSpace() {
     recurrence_patterns: ['Aguardando importações...']
   });
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [uploadToDelete, setUploadToDelete] = useState<UploadHistoryItem | null>(null);
+  const [isDeletingUpload, setIsDeletingUpload] = useState(false);
 
   // Rules Engine State
   const [rules, setRules] = useState<ClassificationRule[]>([]);
@@ -167,17 +170,41 @@ export function UserSpace() {
     }
   };
 
-  const handleRecalculateContextMap = async () => {
+  const handleOptimizeAI = async () => {
     setIsRecalculating(true);
     try {
+      await api.post('/ai/categorize');
       const res = await api.post('/ai/recalculate');
       if (res.data?.contextMap) {
         setContextMap(res.data.contextMap);
       }
+      await Promise.all([fetchTransactions(), fetchContextMap()]);
     } catch (err) {
-      console.error('Failed to recalculate context map:', err);
+      console.error('Erro ao otimizar IA:', err);
+      alert('Erro ao otimizar IA. Tente novamente.');
     } finally {
       setIsRecalculating(false);
+    }
+  };
+
+  const handleDeleteUpload = async () => {
+    if (!uploadToDelete) return;
+
+    setIsDeletingUpload(true);
+    try {
+      const result = await deleteUpload(uploadToDelete.id);
+      setUploads((prev) => prev.filter((u) => u.id !== uploadToDelete.id));
+      await fetchTransactions();
+      alert(
+        `Extrato "${result.filename}" excluído com sucesso. ${result.deletedTransactions} transações removidas.`
+      );
+      setIsDeleteModalOpen(false);
+      setUploadToDelete(null);
+    } catch (err) {
+      console.error('Erro ao excluir extrato:', err);
+      alert('Erro ao excluir extrato. Tente novamente.');
+    } finally {
+      setIsDeletingUpload(false);
     }
   };
 
@@ -451,17 +478,102 @@ export function UserSpace() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4 flex-shrink-0 text-right">
-                          <div>
-                            <span className="block text-xs font-bold text-neutral-300">{upload.transaction_count} lançamentos</span>
-                            <span className="inline-flex items-center gap-1 text-[10px] text-success-400 font-mono mt-0.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-success-500" />
-                              Sucesso
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <div className="text-right">
+                            <span className="block text-xs font-bold text-neutral-300">
+                              {upload.transaction_count} transações
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-mono mt-0.5 px-2 py-0.5 rounded-full border ${
+                                upload.status === 'success'
+                                  ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                                  : 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  upload.status === 'success' ? 'bg-emerald-500' : 'bg-amber-500'
+                                }`}
+                              />
+                              {upload.status === 'success' ? 'Sucesso' : upload.status}
                             </span>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUploadToDelete(upload);
+                              setIsDeleteModalOpen(true);
+                            }}
+                            className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors"
+                            title="Excluir extrato"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
+                            </svg>
+                          </button>
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {isDeleteModalOpen && uploadToDelete && (
+                  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-neutral-900 rounded-2xl p-6 max-w-md w-full mx-4 border border-neutral-700 shadow-2xl">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
+                          <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                            />
+                          </svg>
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">Excluir Extrato</h3>
+                          <p className="text-sm text-neutral-400">Esta ação não pode ser desfeita</p>
+                        </div>
+                      </div>
+                      <div className="bg-neutral-950/50 rounded-xl p-4 mb-4 border border-neutral-800">
+                        <p className="text-sm text-neutral-300 mb-2">
+                          <strong>Arquivo:</strong> {uploadToDelete.filename}
+                        </p>
+                        <p className="text-sm text-neutral-300">
+                          <strong>Transações:</strong> {uploadToDelete.transaction_count} registros serão removidos
+                        </p>
+                      </div>
+                      <p className="text-sm text-neutral-400 mb-6">
+                        Todas as transações importadas deste extrato serão permanentemente excluídas.
+                      </p>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDeleteModalOpen(false);
+                            setUploadToDelete(null);
+                          }}
+                          disabled={isDeletingUpload}
+                          className="flex-1 py-2.5 px-4 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-300 font-medium hover:bg-neutral-750 transition-colors disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDeleteUpload}
+                          disabled={isDeletingUpload}
+                          className="flex-1 py-2.5 px-4 rounded-xl bg-red-500/20 border border-red-500/50 text-red-400 font-medium hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                        >
+                          {isDeletingUpload ? 'Excluindo...' : 'Excluir'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -482,7 +594,7 @@ export function UserSpace() {
                     whileTap={{ scale: isRecalculating ? 1 : 0.95 }}
                     transition={{ type: "spring", stiffness: 400, damping: 15 }}
                     disabled={isRecalculating}
-                    onClick={handleRecalculateContextMap}
+                    onClick={handleOptimizeAI}
                     className="btn-tech-outline px-3.5 py-2 rounded-xl text-xs font-semibold tracking-wide flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   >
                     {isRecalculating ? (
