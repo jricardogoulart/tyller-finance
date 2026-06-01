@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { Button, InputField } from './ComponentsSection';
 import { Checkbox } from './ui/Checkbox';
+import TyllerComplete from './layout/TyllerComplete';
 
 export function AuthPage() {
   const { login, signup, error, clearError } = useAuth();
@@ -105,28 +106,7 @@ export function AuthPage() {
             transition={{ duration: 0.2 }}
             className="flex items-center gap-2.5"
           >
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ backgroundColor: "var(--color-brand-400)" }}
-            >
-              <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
-                <rect x="1" y="1" width="5" height="5" rx="1" fill="var(--color-neutral-950)" />
-                <rect x="8" y="1" width="5" height="5" rx="1" fill="var(--color-neutral-950)" opacity="0.5" />
-                <rect x="1" y="8" width="5" height="5" rx="1" fill="var(--color-neutral-950)" opacity="0.3" />
-                <rect x="8" y="8" width="5" height="5" rx="1" fill="var(--color-neutral-950)" opacity="0.7" />
-              </svg>
-            </div>
-            <span
-              style={{
-                fontFamily: "var(--font-family-body)",
-                fontSize: "var(--font-size-md)",
-                fontWeight: "var(--font-weight-semibold)",
-                color: "var(--color-neutral-100)",
-                letterSpacing: "var(--letter-spacing-tight)",
-              }}
-            >
-              TyllerFinance
-            </span>
+            <TyllerComplete className="h-8 w-auto" />
           </motion.div>
           
           <h2

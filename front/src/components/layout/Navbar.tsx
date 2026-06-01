@@ -1,4 +1,5 @@
 import React from "react";
+import TyllerComplete from "./TyllerComplete";
 import { NavLink } from "../ui/NavLink";
 
 interface NavbarProps {
@@ -30,29 +31,9 @@ export function Navbar({
         {/* Logo / Brand Name */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2.5 cursor-pointer">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-brand-400">
-              <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
-                <rect x="1" y="1" width="5" height="5" rx="1" fill="var(--color-neutral-950)" />
-                <rect x="8" y="1" width="5" height="5" rx="1" fill="var(--color-neutral-950)" opacity="0.5" />
-                <rect x="1" y="8" width="5" height="5" rx="1" fill="var(--color-neutral-950)" opacity="0.3" />
-                <rect x="8" y="8" width="5" height="5" rx="1" fill="var(--color-neutral-950)" opacity="0.7" />
-              </svg>
-            </div>
-            <span
-              style={{
-                fontFamily: "var(--font-family-body)",
-                fontSize: "var(--font-size-base)",
-                fontWeight: "var(--font-weight-semibold)",
-                color: "var(--color-neutral-100)",
-                letterSpacing: "var(--letter-spacing-tight)",
-              }}
-            >
-              TyllerFinance
-            </span>
+            <TyllerComplete className="h-16 w-auto" />
           </div>
-          <span className="hidden md:inline px-2 py-0.5 rounded-full text-[10px] font-mono text-brand-500 bg-brand-950 border border-brand-800">
-            v1.0.0
-          </span>
+  
         </div>
 
         {/* Navigation Links using NavLink */}
