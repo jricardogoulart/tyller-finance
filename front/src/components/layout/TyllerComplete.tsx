@@ -1,11 +1,35 @@
 import { SVGProps } from "react"
+import type { LogoSize } from "./Tyller"
 
-function SvgComponent(props: SVGProps<SVGSVGElement>) {
+/** Height values (px) for each semantic size.
+ *  Width is derived from the viewBox aspect ratio ≈ 2.694 : 1 */
+const WORDMARK_HEIGHT: Record<LogoSize, number> = {
+  xs:   12,
+  sm:   16,
+  md:   24,
+  lg:   32,
+  xl:   48,
+  "2xl": 72,
+}
+
+const ASPECT = 2963.32 / 1100.66 // viewBox width / height ≈ 2.694
+
+interface TyllerCompleteProps extends Omit<SVGProps<SVGSVGElement>, "width" | "height"> {
+  /** Semantic size token. Overridden by explicit width/height if provided. */
+  size?: LogoSize
+  width?: number | string
+  height?: number | string
+}
+
+function SvgComponent({ size = "md", width, height, ...props }: TyllerCompleteProps) {
+  const h = WORDMARK_HEIGHT[size]
+  const resolvedHeight = height ?? h
+  const resolvedWidth  = width  ?? Math.round(h * ASPECT)
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width="29.6332mm"
-      height="11.0066mm"
+      width={resolvedWidth}
+      height={resolvedHeight}
       viewBox="0 0 2963.32 1100.66"
       shapeRendering="geometricPrecision"
       textRendering="geometricPrecision"

@@ -7,12 +7,19 @@ import { RadiusShadowSection } from "../../components/RadiusShadowSection";
 import { ZIndexBreakpointSection } from "../../components/ZIndexBreakpointSection";
 import { ComponentsSection } from "../../components/ComponentsSection";
 import { TokenExplorer } from "../../components/TokenExplorer";
+import { LogoSection } from "../../components/LogoSection";
 import { Divider } from "../../components/layout/Footer";
 
 export function DesignSystemPage() {
   return (
     <>
       <Divider label="Visual Design System Showcase" />
+
+      {/* ── Logo & Brand Mark ── */}
+      <motion.div id="logo">
+        <Divider label="00 · Logo & Brand Mark" />
+        <LogoSection />
+      </motion.div>
 
       {/* ── Colors ── */}
       <motion.div id="colors">

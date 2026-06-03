@@ -1,11 +1,33 @@
 import { SVGProps } from "react"
 
-function SvgComponent(props: SVGProps<SVGSVGElement>) {
+export type LogoSize = "xs" | "sm" | "md" | "lg" | "xl" | "2xl"
+
+const SIZE_MAP: Record<LogoSize, number> = {
+  xs:  16,
+  sm:  24,
+  md:  32,
+  lg:  48,
+  xl:  64,
+  "2xl": 96,
+}
+
+interface TyllerProps extends Omit<SVGProps<SVGSVGElement>, "width" | "height"> {
+  /** Semantic size token. Overridden by explicit width/height if provided. */
+  size?: LogoSize
+  width?: number | string
+  height?: number | string
+}
+
+function SvgComponent({ size = "md", width, height, ...props }: TyllerProps) {
+  const px = SIZE_MAP[size]
+  const resolvedWidth  = width  ?? px
+  const resolvedHeight = height ?? px
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width="25.3998mm"
-      height="25.3998mm"
+      width={resolvedWidth}
+      height={resolvedHeight}
       viewBox="0 0 2539.98 2539.98"
       shapeRendering="geometricPrecision"
       textRendering="geometricPrecision"
