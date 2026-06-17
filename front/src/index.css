@@ -1446,3 +1446,14 @@ input[type="number"] {
     0 12px 40px 0 rgba(0, 0, 0, 0.55),
     inset 0 1px 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee,
+  .animate-float,
+  .animate-float-slow,
+  .animate-pulse-glow,
+  .text-gradient-hero-loop,
+  .text-gradient-brand-loop {
+    animation: none !important;
+  }
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { BackgroundEffects } from "./components/layout/BackgroundEffects";
 import { Hero } from "./components/Hero";
@@ -11,37 +11,60 @@ import { DashboardPage } from "./pages/dashboard/DashboardPage";
 import { UserSpacePage } from "./pages/user-space/UserSpacePage";
 import { ProfilePage } from "./pages/profile/ProfilePage";
 import { DesignSystemPage } from "./pages/design-system/DesignSystemPage";
+import { LandingPage } from "./pages/landing/LandingPage";
 
 function MainLayout() {
   const { user, loading } = useAuth();
+  const reducedMotion = useReducedMotion();
 
   // Clean, premium hash router state
-  const [route, setRoute] = useState<'app' | 'design-system' | 'user-space' | 'perfil'>(() => {
-    if (window.location.hash === '#/design-system') return 'design-system';
-    if (window.location.hash === '#/user-space') return 'user-space';
-    if (window.location.hash === '#/perfil') return 'perfil';
-    return 'app';
+  type Route = 'landing' | 'auth' | 'app' | 'design-system' | 'user-space' | 'perfil';
+  const [route, setRoute] = useState<Route>(() => {
+    const hash = window.location.hash;
+    if (hash === '#/auth') return 'auth';
+    if (hash === '#/app') return 'app';
+    if (hash === '#/design-system') return 'design-system';
+    if (hash === '#/user-space') return 'user-space';
+    if (hash === '#/perfil') return 'perfil';
+    return 'landing';
   });
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash;
-      if (hash === '#/design-system') setRoute('design-system');
+      if (hash === '#/auth') setRoute('auth');
+      else if (hash === '#/app') setRoute('app');
+      else if (hash === '#/design-system') setRoute('design-system');
       else if (hash === '#/user-space') setRoute('user-space');
       else if (hash === '#/perfil') setRoute('perfil');
-      else setRoute('app');
+      else setRoute('landing');
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const navigateTo = (newRoute: 'app' | 'design-system' | 'user-space' | 'perfil') => {
-    if (newRoute === 'design-system') window.location.hash = '#/design-system';
-    else if (newRoute === 'user-space') window.location.hash = '#/user-space';
-    else if (newRoute === 'perfil') window.location.hash = '#/perfil';
-    else window.location.hash = '#/';
+  const navigateTo = (newRoute: Route) => {
+    if (newRoute === 'landing') window.location.hash = '#/';
+    else window.location.hash = `#/${newRoute}`;
     setRoute(newRoute);
   };
+
+  const isAuthedRoute = route === 'app' || route === 'design-system' || route === 'user-space' || route === 'perfil';
+  const isPublicRoute = route === 'landing' || route === 'auth';
+
+  useEffect(() => {
+    if (!loading && !user && isAuthedRoute) {
+      window.location.hash = '#/auth';
+      setRoute('auth');
+    }
+  }, [loading, user, isAuthedRoute]);
+
+  useEffect(() => {
+    if (user && route === 'auth') {
+      window.location.hash = '#/app';
+      setRoute('app');
+    }
+  }, [user, route]);
 
   if (loading) {
     return (
@@ -67,36 +90,47 @@ function MainLayout() {
     );
   }
 
-  if (!user) {
-    return <AuthPage />;
-  }
-
   return (
     <div className="relative isolation-isolate" style={{ minHeight: "100vh" }}>
       {/* ── Global Animated Background Effects ── */}
-      <BackgroundEffects />
+      <BackgroundEffects reducedMotion={!!reducedMotion} />
 
-      {/* Hero + Nav */}
-      <Hero currentRoute={route} onNavigate={navigateTo} />
+      {/* Authed Hero + Nav */}
+      {user && isAuthedRoute && (
+        <Hero
+          currentRoute={route as 'app' | 'design-system' | 'user-space' | 'perfil'}
+          onNavigate={navigateTo}
+        />
+      )}
 
       {/* Pages Switcher */}
-      {route === 'app' && (
+      {route === 'landing' && (
+        <LandingPage />
+      )}
+
+      {route === 'auth' && !user && (
+        <AuthPage />
+      )}
+
+      {route === 'app' && user && (
         <DashboardPage navigateTo={navigateTo} />
       )}
 
-      {route === 'user-space' && (
+      {route === 'user-space' && user && (
         <UserSpacePage />
       )}
 
-      {route === 'perfil' && (
+      {route === 'perfil' && user && (
         <ProfilePage />
       )}
 
-      {route === 'design-system' && (
+      {route === 'design-system' && user && (
         <DesignSystemPage />
       )}
 
-      <Footer isDesignSystem={route === 'design-system'} />
+      {!isPublicRoute && user && (
+        <Footer isDesignSystem={route === 'design-system'} />
+      )}
     </div>
   );
 }

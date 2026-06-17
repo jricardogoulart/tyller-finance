@@ -44,9 +44,11 @@ function MarqueeText() {
   );
 }
 
+type AppRoute = 'app' | 'design-system' | 'user-space' | 'perfil';
+
 interface HeroProps {
-  currentRoute: 'app' | 'design-system' | 'user-space' | 'perfil';
-  onNavigate: (route: 'app' | 'design-system' | 'user-space' | 'perfil') => void;
+  currentRoute: AppRoute;
+  onNavigate: (route: AppRoute | 'landing' | 'auth') => void;
 }
 
 export function Hero({ currentRoute, onNavigate }: HeroProps) {

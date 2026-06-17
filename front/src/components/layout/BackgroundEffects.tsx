@@ -1,9 +1,18 @@
 import React, { useEffect, useRef } from "react";
 
-export function BackgroundEffects() {
+export function BackgroundEffects({ reducedMotion = false }: { reducedMotion?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (reducedMotion) {
+      // Keep CSS vars stable (no parallax loop) for reduced-motion users.
+      if (containerRef.current) {
+        containerRef.current.style.setProperty("--mouse-x", "0");
+        containerRef.current.style.setProperty("--mouse-y", "0");
+      }
+      return;
+    }
+
     let reqId: number;
     let targetX = 0;
     let targetY = 0;
@@ -35,7 +44,7 @@ export function BackgroundEffects() {
       window.removeEventListener("mousemove", handleMouseMove);
       cancelAnimationFrame(reqId);
     };
-  }, []);
+  }, [reducedMotion]);
 
   return (
     <div 

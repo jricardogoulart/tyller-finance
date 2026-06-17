@@ -101,13 +101,15 @@ export function AuthPage() {
       <div className="relative z-10 w-full max-w-md">
         {/* Logo/Branding abstracted from /front */}
         <div className="flex flex-col items-center gap-3 mb-8 text-center">
-          <motion.div
+          <motion.a
+            href="#/"
             whileHover={{ scale: 1.05 }}
             transition={{ duration: 0.2 }}
             className="flex items-center gap-2.5"
+            aria-label="Voltar para a página inicial"
           >
             <TyllerComplete className="h-8 w-auto" />
-          </motion.div>
+          </motion.a>
           
           <h2
             className="mt-4"
