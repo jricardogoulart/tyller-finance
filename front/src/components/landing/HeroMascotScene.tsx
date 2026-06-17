@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
+import { useState, useEffect } from "react";
 import { transition } from "./motion";
 
 const MASCOT_SRC = "/Tyller%20Hero.png";
@@ -16,14 +17,12 @@ type CoinConfig = {
   symbol: string;
 };
 
+// Kept only 4 coins to remove excess visual noise (Item 81)
 const COINS: CoinConfig[] = [
-  { id: "c1", top: "6%", left: "2%", size: 44, depth: 0.72, delay: 0, duration: 5.2, symbol: "R$" },
-  { id: "c2", top: "14%", right: "-2%", size: 52, depth: 0.88, delay: 0.4, duration: 4.8, symbol: "◆" },
-  { id: "c3", top: "42%", left: "-10%", size: 38, depth: 0.62, delay: 0.8, duration: 5.6, symbol: "R$" },
-  { id: "c4", top: "38%", right: "-8%", size: 48, depth: 0.95, delay: 0.2, duration: 4.4, symbol: "◆" },
-  { id: "c5", bottom: "20%", left: "4%", size: 42, depth: 0.78, delay: 1.1, duration: 5, symbol: "R$" },
-  { id: "c6", bottom: "16%", right: "2%", size: 46, depth: 0.84, delay: 0.6, duration: 4.6, symbol: "◆" },
-  { id: "c7", top: "22%", left: "50%", size: 32, depth: 0.55, delay: 1.4, duration: 6, symbol: "R$" },
+  { id: "c1", top: "8%", left: "4%", size: 42, depth: 0.68, delay: 0, duration: 5.2, symbol: "R$" }, // blurry background
+  { id: "c2", top: "14%", right: "-2%", size: 52, depth: 0.88, delay: 0.4, duration: 4.8, symbol: "◆" }, // crisp mid-foreground
+  { id: "c4", top: "45%", right: "-6%", size: 48, depth: 0.95, delay: 0.2, duration: 4.4, symbol: "◆" }, // crisp foreground
+  { id: "c5", bottom: "18%", left: "6%", size: 40, depth: 0.75, delay: 1.1, duration: 5, symbol: "R$" }, // soft mid-ground
 ];
 
 function Coin3D({
@@ -37,6 +36,9 @@ function Coin3D({
   reducedMotion: boolean | null;
 }) {
   const uid = `coin-${symbol}-${size}-${delay}`.replace(/\W/g, "");
+  
+  // Real Bokeh blur logic based on depth (Item 52)
+  const blurVal = depth < 0.75 ? "2px" : depth < 0.88 ? "0.8px" : "0px";
 
   return (
     <motion.div
@@ -45,7 +47,7 @@ function Coin3D({
         width: size,
         height: size,
         transformStyle: "preserve-3d",
-        filter: `drop-shadow(0 ${6 * depth}px ${14 * depth}px rgba(0,0,0,0.45))`,
+        filter: `drop-shadow(0 ${6 * depth}px ${14 * depth}px rgba(0,0,0,0.45)) blur(${blurVal})`,
       }}
       animate={
         reducedMotion
@@ -109,6 +111,21 @@ function Coin3D({
 
 export function HeroMascotScene() {
   const reducedMotion = useReducedMotion();
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  // Mouse move Parallax effect (Item 86)
+  useEffect(() => {
+    if (reducedMotion) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const { clientX, clientY } = e;
+      const x = (clientX - window.innerWidth / 2) / 35;
+      const y = (clientY - window.innerHeight / 2) / 35;
+      setMousePos({ x, y });
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, [reducedMotion]);
 
   return (
     <div
@@ -117,10 +134,34 @@ export function HeroMascotScene() {
       aria-hidden
     >
       {/* Ambient stage */}
-      <div
+      <motion.div
         className="absolute inset-[12%] rounded-full blur-[80px] opacity-40 pointer-events-none bg-glow-lime"
-        style={{ mixBlendMode: "screen" }}
+        style={{
+          mixBlendMode: "screen",
+          x: mousePos.x * -0.5,
+          y: mousePos.y * -0.5
+        }}
       />
+      
+      {/* Soft Contact Shadow under floating mascot (Item 49) */}
+      <motion.div
+        className="absolute left-[26%] bottom-[12%] w-[48%] h-[8px] bg-black/60 rounded-full blur-[5px] z-0 pointer-events-none"
+        style={{
+          transform: "rotateX(75deg)",
+          x: mousePos.x * 0.4,
+          y: mousePos.y * 0.4
+        }}
+        animate={reducedMotion ? undefined : {
+          scale: [0.95, 1.05, 0.95],
+          opacity: [0.5, 0.7, 0.5]
+        }}
+        transition={reducedMotion ? undefined : {
+          duration: 5.5,
+          repeat: Infinity,
+          ease: "easeInOut"
+        }}
+      />
+
       <div
         className="absolute left-1/2 bottom-[8%] -translate-x-1/2 w-[72%] h-[14%] rounded-[100%] pointer-events-none"
         style={{
@@ -137,33 +178,44 @@ export function HeroMascotScene() {
         }}
       />
 
-      {/* Orbiting coins */}
-      {COINS.map((coin) => (
-        <div
-          key={coin.id}
-          className="absolute z-20"
-          style={{
-            top: coin.top,
-            left: coin.left,
-            right: coin.right,
-            bottom: coin.bottom,
-            transform: coin.id === "c7" ? "translateX(-50%)" : undefined,
-          }}
-        >
-          <Coin3D
-            size={coin.size}
-            depth={coin.depth}
-            symbol={coin.symbol}
-            delay={coin.delay}
-            duration={coin.duration}
-            reducedMotion={reducedMotion}
-          />
-        </div>
-      ))}
-
-      {/* Mascot — smaller, centered, floating */}
+      {/* Orbiting coins with mouse parallax offset */}
       <motion.div
-        className="absolute inset-0 flex items-center justify-center z-10"
+        style={{
+          x: mousePos.x * 1.3,
+          y: mousePos.y * 1.3
+        }}
+        className="absolute inset-0 pointer-events-none z-20"
+      >
+        {COINS.map((coin) => (
+          <div
+            key={coin.id}
+            className="absolute"
+            style={{
+              top: coin.top,
+              left: coin.left,
+              right: coin.right,
+              bottom: coin.bottom,
+            }}
+          >
+            <Coin3D
+              size={coin.size}
+              depth={coin.depth}
+              symbol={coin.symbol}
+              delay={coin.delay}
+              duration={coin.duration}
+              reducedMotion={reducedMotion}
+            />
+          </div>
+        ))}
+      </motion.div>
+
+      {/* Mascot — smaller, centered, floating + mouse parallax */}
+      <motion.div
+        className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
+        style={{
+          x: mousePos.x * 0.8,
+          y: mousePos.y * 0.8
+        }}
         initial={{ opacity: 0, y: 24, scale: 0.92 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={transition(0.85, 0.4, reducedMotion)}
@@ -171,9 +223,9 @@ export function HeroMascotScene() {
         <motion.img
           src={MASCOT_SRC}
           alt=""
-          className="w-[58%] max-w-[220px] h-auto object-contain drop-shadow-[0_24px_48px_rgba(0,0,0,0.55)]"
-          width={220}
-          height={280}
+          className="w-[58%] max-w-[200px] h-auto object-contain drop-shadow-[0_24px_48px_rgba(0,0,0,0.55)]"
+          width={200}
+          height={260}
           fetchPriority="high"
           decoding="async"
           animate={reducedMotion ? undefined : { y: [0, -10, 0] }}
@@ -189,7 +241,13 @@ export function HeroMascotScene() {
       </motion.div>
 
       {/* Subtle tech grid behind */}
-      <div className="absolute inset-[8%] rounded-full bg-tech-grid opacity-30 pointer-events-none z-0" />
+      <motion.div 
+        style={{
+          x: mousePos.x * -0.2,
+          y: mousePos.y * -0.2
+        }}
+        className="absolute inset-[8%] rounded-full bg-tech-grid opacity-30 pointer-events-none z-0" 
+      />
     </div>
   );
 }
