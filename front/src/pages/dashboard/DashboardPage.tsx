@@ -1038,25 +1038,78 @@ export function DashboardPage({ navigateTo }: DashboardPageProps) {
                       {/* Right: Plan details */}
                       <div className="flex flex-col gap-6">
                         {selectedPlan && (
-                          <div className="rounded-2xl border p-5 flex flex-col gap-4 bg-neutral-900 border-neutral-800">
-                            <div className="text-left">
-                              <h4 style={{
-                                fontFamily: 'var(--font-family-body)',
-                                fontSize: 'var(--font-size-sm)',
-                                fontWeight: 'var(--font-weight-semibold)' as any,
-                                color: 'var(--color-neutral-100)'
-                              }}>
-                                Detalhes do Plano Gerado
-                              </h4>
-                              <p className="text-[10px] text-neutral-400 font-mono">
-                                Plano otimizado por IA para economia
-                              </p>
+                          <>
+                            <div className="rounded-2xl border p-5 flex flex-col gap-4 bg-neutral-900 border-neutral-800">
+                              <div className="text-left">
+                                <h4 style={{
+                                  fontFamily: 'var(--font-family-body)',
+                                  fontSize: 'var(--font-size-sm)',
+                                  fontWeight: 'var(--font-weight-semibold)' as any,
+                                  color: 'var(--color-neutral-100)'
+                                }}>
+                                  Detalhes do Plano Gerado
+                                </h4>
+                                <p className="text-[10px] text-neutral-400 font-mono">
+                                  Plano otimizado por IA para economia
+                                </p>
+                              </div>
+
+                              <div className="max-h-[300px] overflow-y-auto pr-1 text-left">
+                                {renderMarkdown(selectedPlan.plan_content)}
+                              </div>
                             </div>
 
-                            <div className="max-h-[300px] overflow-y-auto pr-1 text-left">
-                              {renderMarkdown(selectedPlan.plan_content)}
-                            </div>
-                          </div>
+                            {/* M-04: Category Breakdown */}
+                            {selectedPlan.category_percentages && selectedPlan.category_percentages.length > 0 && (
+                              <div className="rounded-2xl border p-5 flex flex-col gap-4 bg-neutral-900 border-neutral-800">
+                                <div className="text-left">
+                                  <h4 style={{
+                                    fontFamily: 'var(--font-family-body)',
+                                    fontSize: 'var(--font-size-sm)',
+                                    fontWeight: 'var(--font-weight-semibold)' as any,
+                                    color: 'var(--color-neutral-100)'
+                                  }}>
+                                    Distribuição de Gastos no Período
+                                  </h4>
+                                  <p className="text-[10px] text-neutral-400 font-mono">
+                                    Breakdown por categoria durante a vigência do plano
+                                  </p>
+                                </div>
+
+                                <div className="space-y-3">
+                                  {selectedPlan.category_percentages.map((cat: { category: string; percentage: number }) => (
+                                    <motion.div
+                                      key={cat.category}
+                                      whileHover={{ scale: 1.02 }}
+                                      transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                                      className="cursor-default"
+                                    >
+                                      <div className="flex items-center justify-between mb-1.5">
+                                        <span className="text-[11px] font-medium text-neutral-300">
+                                          {cat.category}
+                                        </span>
+                                        <span className="text-[10px] font-bold font-mono text-brand-400">
+                                          {cat.percentage.toFixed(1)}%
+                                        </span>
+                                      </div>
+                                      <div className="relative h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-neutral-800)' }}>
+                                        <motion.div
+                                          initial={{ width: 0 }}
+                                          animate={{ width: `${cat.percentage}%` }}
+                                          transition={{ duration: 0.6, ease: "easeOut" }}
+                                          className="absolute inset-y-0 left-0 rounded-full"
+                                          style={{
+                                            background: 'linear-gradient(90deg, var(--color-brand-500), var(--color-brand-400))',
+                                            boxShadow: '0 0 8px rgba(163, 230, 53, 0.3)'
+                                          }}
+                                        />
+                                      </div>
+                                    </motion.div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </>
                         )}
 
                       </div>
