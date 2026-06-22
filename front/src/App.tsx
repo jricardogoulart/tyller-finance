@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion, MotionConfig } from "framer-motion";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { BackgroundEffects } from "./components/layout/BackgroundEffects";
 import { Hero } from "./components/Hero";
@@ -137,8 +137,10 @@ function MainLayout() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <MainLayout />
-    </AuthProvider>
+    <MotionConfig reducedMotion="user">
+      <AuthProvider>
+        <MainLayout />
+      </AuthProvider>
+    </MotionConfig>
   );
 }

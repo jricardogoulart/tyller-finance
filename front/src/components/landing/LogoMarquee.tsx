@@ -1,4 +1,4 @@
-import { motion, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Bot,
   Braces,
@@ -9,7 +9,7 @@ import {
   Server,
   Sparkles,
 } from "lucide-react";
-import { fadeIn, transition } from "./motion";
+import { clipRevealUp } from "./motion";
 
 const STACK = [
   { label: "React", Icon: Layers },
@@ -27,10 +27,17 @@ function MarqueeTrack({ speedClass }: { speedClass: string }) {
   return (
     <div
       className="overflow-hidden w-full"
-      style={{ maskImage: "linear-gradient(90deg, transparent, black 8%, black 92%, transparent)" }}
+      style={{
+        // Fade masks — soft edges so the marquee blends into the page
+        maskImage: "linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)",
+      }}
       aria-hidden
     >
-      <div className={`flex gap-10 ${speedClass} whitespace-nowrap`} style={{ width: "max-content" }}>
+      <div
+        className={`flex gap-10 ${speedClass} whitespace-nowrap`}
+        style={{ width: "max-content" }}
+      >
         {doubled.map((item, i) => (
           <span
             key={`${item.label}-${i}`}
@@ -54,16 +61,14 @@ function MarqueeTrack({ speedClass }: { speedClass: string }) {
 }
 
 export function LogoMarquee() {
-  const reducedMotion = useReducedMotion();
-
   return (
+    // Clip-path reveal as section enters viewport
     <motion.section
+      variants={clipRevealUp}
       initial="hidden"
       whileInView="visible"
-      viewport={{ once: true }}
-      variants={fadeIn}
-      transition={transition(0.6, 0, reducedMotion)}
-      className="relative z-10 border-y border-neutral-900 py-5"
+      viewport={{ once: true, margin: "-100px" }}
+      className="relative z-10 border-y border-neutral-900 py-4"
       aria-label="Stack tecnológica"
     >
       <p
@@ -78,16 +83,7 @@ export function LogoMarquee() {
       >
         Construído com tecnologia de ponta
       </p>
-      <MarqueeTrack speedClass={reducedMotion ? "" : "animate-marquee"} />
-      {reducedMotion && (
-        <div className="flex flex-wrap justify-center gap-4 mt-4 px-4">
-          {STACK.map((item) => (
-            <span key={item.label} className="ds-badge ds-badge-neutral">
-              {item.label}
-            </span>
-          ))}
-        </div>
-      )}
+      <MarqueeTrack speedClass="animate-marquee" />
     </motion.section>
   );
 }

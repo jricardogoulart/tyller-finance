@@ -1,8 +1,17 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { useState, useEffect } from "react";
-import { transition } from "./motion";
 
-const MASCOT_SRC = "/Tyller%20Hero.png";
+// ── Static imports — processed by Vite, inlined as data URLs by viteSingleFile ──
+import mascotSrc from "../../assets/images/tyller-hero.webp";
+import coinGreen1Src from "../../assets/images/greencoinv1.webp";
+import coin1Src from "../../assets/images/Coin1.webp";
+import coinGreen2Src from "../../assets/images/greencoinv2.webp";
+import tcoin1Src from "../../assets/images/tcoin1.webp";
+import coin2Src from "../../assets/images/Coin2.webp";
+
+// Standard, uniform coin size (px) — every coin renders at the same size.
+const COIN_SIZE = 50;
+
+type GlowTone = "gold" | "green";
 
 type CoinConfig = {
   id: string;
@@ -10,243 +19,233 @@ type CoinConfig = {
   left?: string;
   right?: string;
   bottom?: string;
-  size: number;
   depth: number;
-  delay: number;
-  duration: number;
-  symbol: string;
+  src: string;
+  glow: GlowTone;
 };
 
-// Kept only 4 coins to remove excess visual noise (Item 81)
+const GLOW_RGB: Record<GlowTone, string> = {
+  gold: "212,175,55",
+  green: "190,240,48",
+};
+
+// Coins use brand image assets — imported statically so Vite bundles them.
+// Harmonious, balanced set: 3 green brand coins + 3 gold, evenly spread around the mascot.
 const COINS: CoinConfig[] = [
-  { id: "c1", top: "8%", left: "4%", size: 42, depth: 0.68, delay: 0, duration: 5.2, symbol: "R$" }, // blurry background
-  { id: "c2", top: "14%", right: "-2%", size: 52, depth: 0.88, delay: 0.4, duration: 4.8, symbol: "◆" }, // crisp mid-foreground
-  { id: "c4", top: "45%", right: "-6%", size: 48, depth: 0.95, delay: 0.2, duration: 4.4, symbol: "◆" }, // crisp foreground
-  { id: "c5", bottom: "18%", left: "6%", size: 40, depth: 0.75, delay: 1.1, duration: 5, symbol: "R$" }, // soft mid-ground
+  { id: "c1", top: "8%", left: "4%", depth: 0.72, src: coinGreen1Src, glow: "green" },
+  { id: "c2", top: "12%", right: "2%", depth: 0.88, src: coin1Src, glow: "gold" },
+  { id: "c3", top: "40%", left: "-5%", depth: 0.82, src: coinGreen2Src, glow: "green" },
+  { id: "c4", top: "44%", right: "-5%", depth: 0.92, src: tcoin1Src, glow: "gold" },
+  { id: "c5", bottom: "20%", left: "6%", depth: 0.78, src: coin2Src, glow: "gold" },
+  { id: "c6", bottom: "24%", right: "3%", depth: 0.84, src: coinGreen2Src, glow: "green" },
 ];
 
 function Coin3D({
-  size,
   depth,
-  symbol,
-  delay,
-  duration,
+  src,
+  glow,
   reducedMotion,
-}: Pick<CoinConfig, "size" | "depth" | "symbol" | "delay" | "duration"> & {
+}: Pick<CoinConfig, "depth" | "src" | "glow"> & {
   reducedMotion: boolean | null;
 }) {
-  const uid = `coin-${symbol}-${size}-${delay}`.replace(/\W/g, "");
-  
-  // Real Bokeh blur logic based on depth (Item 52)
-  const blurVal = depth < 0.75 ? "2px" : depth < 0.88 ? "0.8px" : "0px";
+  const rgb = GLOW_RGB[glow];
+  const spinDuration = 9 - depth * 2.5;
+  const floatDuration = 5.5 + depth * 2;
+  const floatOffset = 6 + depth * 4;
 
   return (
     <motion.div
-      className="pointer-events-none select-none"
-      style={{
-        width: size,
-        height: size,
-        transformStyle: "preserve-3d",
-        filter: `drop-shadow(0 ${6 * depth}px ${14 * depth}px rgba(0,0,0,0.45)) blur(${blurVal})`,
-      }}
-      animate={
-        reducedMotion
-          ? { rotateY: 18, scale: depth }
-          : {
-              y: [0, -10 * depth, 0],
-              rotateY: [0, 180, 360],
-              scale: [depth * 0.96, depth * 1.04, depth * 0.96],
-            }
-      }
-      transition={
-        reducedMotion
-          ? { duration: 0.01 }
-          : { duration, delay, repeat: Infinity, ease: "easeInOut" }
-      }
+      className="pointer-events-none select-none relative"
+      style={{ width: COIN_SIZE, height: COIN_SIZE, transform: `scale(${depth})`, willChange: "transform" }}
+      animate={reducedMotion ? undefined : { y: [-floatOffset, floatOffset, -floatOffset] }}
+      transition={reducedMotion ? undefined : { duration: floatDuration, repeat: Infinity, ease: "easeInOut" }}
     >
-      <svg
-        viewBox="0 0 64 64"
-        width={size}
-        height={size}
+      {/* Static soft contact shadow */}
+      <span
         aria-hidden
-        style={{ transform: "rotateX(12deg)" }}
-      >
-        <defs>
-          <linearGradient id={`${uid}-face`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#f8fde8" />
-            <stop offset="35%" stopColor="#dff986" />
-            <stop offset="65%" stopColor="#bef030" />
-            <stop offset="100%" stopColor="#86ae10" />
-          </linearGradient>
-          <linearGradient id={`${uid}-rim`} x1="0%" y1="50%" x2="100%" y2="50%">
-            <stop offset="0%" stopColor="#475d08" />
-            <stop offset="50%" stopColor="#a8d918" />
-            <stop offset="100%" stopColor="#2e3d05" />
-          </linearGradient>
-          <radialGradient id={`${uid}-shine`} cx="30%" cy="25%" r="55%">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.85)" />
-            <stop offset="100%" stopColor="rgba(255,255,255,0)" />
-          </radialGradient>
-        </defs>
-        <ellipse cx="32" cy="58" rx="22" ry="5" fill="rgba(0,0,0,0.35)" />
-        <circle cx="32" cy="32" r="28" fill={`url(#${uid}-rim)`} />
-        <circle cx="32" cy="30" r="24" fill={`url(#${uid}-face)`} />
-        <circle cx="32" cy="30" r="24" fill={`url(#${uid}-shine)`} />
-        <circle cx="32" cy="30" r="24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
-        <text
-          x="32"
-          y="36"
-          textAnchor="middle"
-          fontSize={symbol === "R$" ? "14" : "18"}
-          fontFamily="var(--font-family-mono)"
-          fontWeight="700"
-          fill="#2e3d05"
-        >
-          {symbol}
-        </text>
-      </svg>
+        className="absolute inset-0 rounded-full"
+        style={{
+          background: `radial-gradient(circle at 50% 60%, rgba(0,0,0,0.28) 0%, transparent 65%)`,
+          filter: "blur(4px)",
+          transform: "translateY(10%)",
+        }}
+      />
+      {/* Pulsing ambient glow halo */}
+      <motion.span
+        aria-hidden
+        className="absolute inset-[-22%] rounded-full"
+        style={{
+          background: `radial-gradient(circle, rgba(${rgb},0.28) 0%, transparent 62%)`,
+          willChange: "transform, opacity",
+        }}
+        animate={reducedMotion ? { opacity: 0.3 } : { opacity: [0.25, 0.55, 0.25], scale: [0.92, 1.06, 0.92] }}
+        transition={
+          reducedMotion
+            ? { duration: 0.01 }
+            : { duration: floatDuration * 0.8, repeat: Infinity, ease: "easeInOut" }
+        }
+      />
+      <motion.img
+        src={src}
+        alt=""
+        aria-hidden
+        width={COIN_SIZE}
+        height={COIN_SIZE}
+        decoding="async"
+        loading="lazy"
+        className="relative w-full h-full object-contain"
+        style={{ backfaceVisibility: "hidden", willChange: "transform" }}
+        animate={reducedMotion ? { rotateY: 18 } : { rotateY: 360 }}
+        transition={
+          reducedMotion
+            ? { duration: 0.01 }
+            : { duration: spinDuration, repeat: Infinity, ease: "linear" }
+        }
+      />
+
+      {/* Specular shader — glint sweeping across the coin face */}
+      <motion.span
+        aria-hidden
+        className="absolute inset-0 rounded-full"
+        style={{
+          mixBlendMode: "screen",
+          willChange: "transform, opacity",
+          background: `linear-gradient(115deg, transparent 28%, rgba(255,255,255,0.95) 47%, rgba(${rgb},0.75) 53%, transparent 72%)`,
+          backgroundSize: "260% 260%",
+        }}
+        animate={
+          reducedMotion
+            ? { backgroundPosition: "50% 50%", opacity: 0.4 }
+            : { backgroundPosition: ["140% -40%", "-40% 140%"], opacity: [0, 1, 0] }
+        }
+        transition={
+          reducedMotion
+            ? { duration: 0.01 }
+            : { duration: spinDuration * 0.66, repeat: Infinity, ease: "easeInOut", repeatDelay: 0.6 }
+        }
+      />
+
+      {/* Thin bright metallic rim */}
+      <span
+        aria-hidden
+        className="absolute inset-0 rounded-full"
+        style={{
+          mixBlendMode: "screen",
+          background: `radial-gradient(circle at 50% 50%, transparent 60%, rgba(${rgb},0.5) 78%, transparent 82%)`,
+        }}
+      />
     </motion.div>
   );
 }
 
 export function HeroMascotScene() {
   const reducedMotion = useReducedMotion();
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-
-  // Mouse move Parallax effect (Item 86)
-  useEffect(() => {
-    if (reducedMotion) return;
-    const handleMouseMove = (e: MouseEvent) => {
-      const { clientX, clientY } = e;
-      const x = (clientX - window.innerWidth / 2) / 35;
-      const y = (clientY - window.innerHeight / 2) / 35;
-      setMousePos({ x, y });
-    };
-
-    window.addEventListener("mousemove", handleMouseMove, { passive: true });
-    return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, [reducedMotion]);
 
   return (
     <div
-      className="relative mx-auto lg:mx-0 w-full max-w-[min(100%,380px)] aspect-square"
-      style={{ perspective: "1100px" }}
+      className="relative mx-auto w-full max-w-[300px] sm:max-w-[340px]"
+      style={{ perspective: "1100px", height: "320px" }}
       aria-hidden
     >
-      {/* Ambient stage */}
-      <motion.div
-        className="absolute inset-[12%] rounded-full blur-[80px] opacity-40 pointer-events-none bg-glow-lime"
-        style={{
-          mixBlendMode: "screen",
-          x: mousePos.x * -0.5,
-          y: mousePos.y * -0.5
-        }}
-      />
-      
-      {/* Soft Contact Shadow under floating mascot (Item 49) */}
-      <motion.div
-        className="absolute left-[26%] bottom-[12%] w-[48%] h-[8px] bg-black/60 rounded-full blur-[5px] z-0 pointer-events-none"
-        style={{
-          transform: "rotateX(75deg)",
-          x: mousePos.x * 0.4,
-          y: mousePos.y * 0.4
-        }}
-        animate={reducedMotion ? undefined : {
-          scale: [0.95, 1.05, 0.95],
-          opacity: [0.5, 0.7, 0.5]
-        }}
-        transition={reducedMotion ? undefined : {
-          duration: 5.5,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
+      {/* Ambient stage glow */}
+      <div
+        className="absolute inset-[12%] rounded-full opacity-40 pointer-events-none"
+        style={{ background: "radial-gradient(circle, rgba(190,240,48,0.5) 0%, transparent 60%)" }}
       />
 
-      <div
-        className="absolute left-1/2 bottom-[8%] -translate-x-1/2 w-[72%] h-[14%] rounded-[100%] pointer-events-none"
-        style={{
-          background: "radial-gradient(ellipse, rgba(190,240,48,0.18) 0%, transparent 70%)",
-          transform: "rotateX(72deg)",
-          filter: "blur(8px)",
-        }}
-      />
-      <div
-        className="absolute left-1/2 bottom-[10%] -translate-x-1/2 w-[58%] h-[3px] rounded-full pointer-events-none"
-        style={{
-          background: "linear-gradient(90deg, transparent, rgba(190,240,48,0.5), transparent)",
-          boxShadow: "0 0 24px rgba(190,240,48,0.35)",
-        }}
-      />
+      {/* Cylinder pedestal */}
+      <div className="absolute left-1/2 bottom-[-36%] -translate-x-1/2 w-[96%] h-[92%] z-0 pointer-events-none">
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-[-4px] w-[98%] h-[36px] rounded-[100%] bg-black/55 blur-[10px]" />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 bottom-[18px] w-full h-[calc(100%-36px)] pointer-events-none"
+          style={{
+            background: "linear-gradient(90deg, #8a9685 0%, #adb6a7 45%, #adb6a7 55%, #8a9685 100%)",
+            borderLeft: "1px solid rgba(206,212,202,0.45)",
+            borderRight: "1px solid rgba(206,212,202,0.45)",
+            boxShadow: "inset 0 0 40px rgba(20,23,18,0.28), 0 0 40px rgba(190,240,48,0.1)",
+          }}
+        />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 bottom-0 w-full h-[36px] rounded-[100%] pointer-events-none"
+          style={{
+            background: "radial-gradient(ellipse at 50% 60%, #667a60 0%, #4e5e49 60%, transparent 100%)",
+            borderTop: "1px solid rgba(206,212,202,0.4)",
+            boxShadow: "0 6px 26px rgba(0,0,0,0.5)",
+          }}
+        />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 top-0 w-full h-[42px] rounded-[100%]"
+          style={{
+            background: "radial-gradient(ellipse at 50% 40%, #ced4ca 0%, #adb6a7 60%, #8a9685 100%)",
+            border: "1px solid rgba(206,212,202,0.55)",
+            boxShadow: "0 0 30px rgba(190,240,48,0.12), inset 0 6px 16px rgba(20,23,18,0.2), inset 0 -3px 8px rgba(206,212,202,0.5)",
+          }}
+        />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 top-[4px] w-[80%] h-[26px] rounded-[100%] pointer-events-none"
+          style={{
+            background: "radial-gradient(ellipse at 50% 30%, rgba(237,240,236,0.6) 0%, transparent 65%)",
+            filter: "blur(2px)",
+          }}
+        />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 top-[10px] w-[66%] h-[3px] rounded-full pointer-events-none"
+          style={{
+            background: "linear-gradient(90deg, transparent, rgba(190,240,48,0.8), transparent)",
+            boxShadow: "0 0 20px rgba(190,240,48,0.5)",
+          }}
+        />
+      </div>
 
-      {/* Orbiting coins with mouse parallax offset */}
-      <motion.div
-        style={{
-          x: mousePos.x * 1.3,
-          y: mousePos.y * 1.3
-        }}
-        className="absolute inset-0 pointer-events-none z-20"
-      >
+      {/* Coins */}
+      <div className="absolute inset-0 pointer-events-none z-20" style={{ transform: "translateY(-20%)" }}>
         {COINS.map((coin) => (
           <div
             key={coin.id}
             className="absolute"
-            style={{
-              top: coin.top,
-              left: coin.left,
-              right: coin.right,
-              bottom: coin.bottom,
-            }}
+            style={{ top: coin.top, left: coin.left, right: coin.right, bottom: coin.bottom }}
           >
-            <Coin3D
-              size={coin.size}
-              depth={coin.depth}
-              symbol={coin.symbol}
-              delay={coin.delay}
-              duration={coin.duration}
-              reducedMotion={reducedMotion}
-            />
+            <Coin3D depth={coin.depth} src={coin.src} glow={coin.glow} reducedMotion={reducedMotion} />
           </div>
         ))}
-      </motion.div>
+      </div>
 
-      {/* Mascot — smaller, centered, floating + mouse parallax */}
-      <motion.div
+      {/* Mascot image — centered in the 380×380 container */}
+      <div
         className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
-        style={{
-          x: mousePos.x * 0.8,
-          y: mousePos.y * 0.8
-        }}
-        initial={{ opacity: 0, y: 24, scale: 0.92 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={transition(0.85, 0.4, reducedMotion)}
       >
-        <motion.img
-          src={MASCOT_SRC}
+        <img
+          src={mascotSrc}
           alt=""
-          className="w-[58%] max-w-[200px] h-auto object-contain drop-shadow-[0_24px_48px_rgba(0,0,0,0.55)]"
+          className="w-[46%] sm:w-[55%] h-auto object-contain"
           width={200}
-          height={260}
+          height={250}
           fetchPriority="high"
           decoding="async"
-          animate={reducedMotion ? undefined : { y: [0, -10, 0] }}
-          transition={
-            reducedMotion
-              ? undefined
-              : { duration: 5.5, repeat: Infinity, ease: "easeInOut" }
-          }
           style={{
-            filter: "drop-shadow(0 0 32px rgba(190,240,48,0.15))",
+            transform: "translateY(-52%)",
+            filter: "drop-shadow(0 0 44px rgba(190,240,48,0.35)) drop-shadow(0 18px 42px rgba(0,0,0,0.7))",
           }}
         />
-      </motion.div>
+      </div>
 
       {/* Subtle tech grid behind */}
-      <motion.div 
+      <div className="absolute inset-[8%] rounded-full bg-tech-grid opacity-30 pointer-events-none z-0" />
+
+      {/* Drifting lime glow shader */}
+      <motion.div
+        aria-hidden
+        className="absolute left-1/4 top-1/4 w-1/2 h-1/2 rounded-full pointer-events-none z-30"
         style={{
-          x: mousePos.x * -0.2,
-          y: mousePos.y * -0.2
+          background: "radial-gradient(circle, rgba(190,240,48,0.22) 0%, transparent 65%)",
+          willChange: "transform, opacity",
         }}
-        className="absolute inset-[8%] rounded-full bg-tech-grid opacity-30 pointer-events-none z-0" 
+        animate={
+          reducedMotion
+            ? { opacity: 0.5 }
+            : { x: ["-10%", "14%", "-4%", "-10%"], y: ["-6%", "8%", "16%", "-6%"], opacity: [0.4, 0.6, 0.4, 0.4] }
+        }
+        transition={reducedMotion ? undefined : { duration: 18, repeat: Infinity, ease: "easeInOut" }}
       />
     </div>
   );

@@ -1,9 +1,12 @@
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Check } from "lucide-react";
 import { useState } from "react";
 import { SectionHeader } from "../SectionHeader";
 import { GlassCard } from "../design-system";
-import { fadeUp, goToAuth, staggerContainer, transition, viewportOnce } from "./motion";
+import { springMed, ease04, fadeUp, staggerContainer, goToAuth, viewportOnce } from "./motion";
+import { ConfettiBurst } from "./Bursts";
+
+// ─── Plan data ────────────────────────────────────────────────────────────────
 
 type Billing = "monthly" | "annual";
 
@@ -58,27 +61,34 @@ const PLANS = [
   },
 ];
 
-function formatPrice(value: number | null, billing: Billing) {
+function formatPrice(value: number | null) {
   if (value === null) return "Sob consulta";
   if (value === 0) return "R$ 0";
   return `R$ ${value}`;
 }
 
+// ─── Pricing component ────────────────────────────────────────────────────────
+
 export function Pricing() {
-  const reducedMotion = useReducedMotion();
   const [billing, setBilling] = useState<Billing>("monthly");
+  const [confettiPlan, setConfettiPlan] = useState<string | null>(null);
 
   return (
-    <section id="pricing" className="py-20 px-6 md:px-12 max-w-screen-xl mx-auto" aria-labelledby="pricing-heading">
+    <section
+      id="pricing"
+      className="py-14 px-6 md:px-12 max-w-screen-xl mx-auto"
+      aria-labelledby="pricing-heading"
+    >
       <SectionHeader
         index="04"
         title="Planos para cada momento"
         description="Comece grátis e evolua conforme suas finanças crescem. Sem surpresas, sem compromisso."
       />
 
-      <div className="flex justify-center mb-10">
+      {/* ── Billing toggle with layoutId slide ───────────────────────── */}
+      <div className="flex justify-center mb-8">
         <div
-          className="inline-flex items-center gap-1 p-1 rounded-2xl border border-neutral-800"
+          className="relative inline-flex items-center gap-1 p-1 rounded-full border border-neutral-800"
           style={{ backgroundColor: "var(--color-neutral-900)" }}
           role="group"
           aria-label="Período de cobrança"
@@ -88,19 +98,28 @@ export function Pricing() {
               key={period}
               type="button"
               onClick={() => setBilling(period)}
-              className="relative px-5 py-2 rounded-xl text-sm cursor-pointer transition-colors"
+              className="relative px-5 py-1.5 rounded-full text-sm cursor-pointer z-10"
               style={{
                 fontFamily: "var(--font-family-body)",
-                color: billing === period ? "var(--color-brand-400)" : "var(--color-neutral-500)",
-                backgroundColor: billing === period ? "rgba(190, 240, 48, 0.08)" : "transparent",
-                border: billing === period ? "1px solid var(--color-brand-800)" : "1px solid transparent",
+                color: billing === period
+                  ? "var(--color-neutral-950)"
+                  : "var(--color-neutral-500)",
               }}
               aria-pressed={billing === period}
             >
-              {period === "monthly" ? "Mensal" : "Anual"}
+              {/* Sliding pill indicator via layoutId */}
+              {billing === period && (
+                <motion.div
+                  layoutId="billing-indicator"
+                  className="absolute inset-0 rounded-full"
+                  style={{ backgroundColor: "var(--color-brand-400)" }}
+                  transition={springMed}
+                />
+              )}
+              <span className="relative z-10">{period === "monthly" ? "Mensal" : "Anual"}</span>
               {period === "annual" && (
                 <span
-                  className="ml-1.5 ds-badge ds-badge-brand"
+                  className="relative z-10 ml-1.5 ds-badge ds-badge-brand"
                   style={{ fontSize: "0.55rem", padding: "0.1rem 0.35rem" }}
                 >
                   -17%
@@ -111,48 +130,59 @@ export function Pricing() {
         </div>
       </div>
 
+      {/* ── Plan cards ─────────────────────────────────────────────────── */}
       <motion.div
-        variants={staggerContainer}
+        variants={staggerContainer()}
         initial="hidden"
         whileInView="visible"
         viewport={viewportOnce}
         className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch"
+        style={{
+          transition: "all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)"
+        }}
       >
         {PLANS.map((plan, i) => {
           const price = billing === "monthly" ? plan.monthly : plan.annual;
           return (
-            <GlassCard
+            <motion.div
               key={plan.id}
-              className={`p-8 flex flex-col h-full relative ${
-                plan.recommended ? "ring-1 ring-brand-700/50" : ""
-              }`}
-              motionProps={{
-                variants: fadeUp,
-                transition: transition(0.5, i * 0.1, reducedMotion),
-                whileHover: reducedMotion ? undefined : { scale: 1.02, y: -4 },
+              variants={fadeUp}
+              transition={{ delay: i * 0.1 }}
+              whileHover={{ scale: 1.02, y: -4 }}
+              whileTap={{ scale: 0.98 }}
+              className={`relative ${plan.recommended ? "pricing-card-pro" : ""}`}
+              style={{
+                transformOrigin: "center bottom"
               }}
             >
-              {plan.recommended && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 ds-badge ds-badge-brand animate-pulse-glow">
-                  Recomendado
-                </span>
-              )}
+              <GlassCard
+                className={`p-8 flex flex-col h-full relative ${
+                  plan.recommended ? "ring-1 ring-brand-700/50" : ""
+                }`}
+              >
+                {plan.recommended && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 ds-badge ds-badge-brand animate-pulse-glow">
+                    Recomendado
+                  </span>
+                )}
 
-              <h3 id={plan.recommended ? "pricing-heading" : undefined} className="ds-card-title text-xl">
-                {plan.name}
-              </h3>
-              <p className="ds-card-subtitle mt-2 mb-6">{plan.description}</p>
+                <h3
+                  id={plan.recommended ? "pricing-heading" : undefined}
+                  className="ds-card-title text-xl"
+                >
+                  {plan.name}
+                </h3>
+                <p className="ds-card-subtitle mt-2 mb-6">{plan.description}</p>
 
-              <div className="mb-6">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={`${plan.id}-${billing}`}
-                    initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reducedMotion ? undefined : { opacity: 0, y: -8 }}
-                    transition={transition(0.25, 0, reducedMotion)}
-                  >
-                    <span
+                {/* Animated price crossfade */}
+                <div className="mb-6 h-12 flex items-baseline">
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={`${plan.id}-${billing}`}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={ease04}
                       style={{
                         fontFamily: "var(--font-family-body)",
                         fontSize: "var(--font-size-4xl)",
@@ -160,48 +190,61 @@ export function Pricing() {
                         color: "var(--color-neutral-100)",
                       }}
                     >
-                      {formatPrice(price, billing)}
-                    </span>
-                    {price !== null && price > 0 && (
-                      <span className="ds-card-subtitle ml-1">/mês</span>
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
+                      {formatPrice(price)}
+                    </motion.span>
+                  </AnimatePresence>
+                  {price !== null && price > 0 && (
+                    <span className="ds-card-subtitle ml-1">/mês</span>
+                  )}
+                </div>
 
-              <ul className="space-y-3 mb-8 flex-1">
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-2.5">
-                    <Check
-                      size={16}
-                      className="shrink-0 mt-0.5"
-                      style={{ color: "var(--color-brand-400)" }}
-                      aria-hidden
-                    />
-                    <span
-                      style={{
-                        fontFamily: "var(--font-family-body)",
-                        fontSize: "var(--font-size-sm)",
-                        color: "var(--color-neutral-400)",
-                      }}
-                    >
-                      {feature}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                <ul className="space-y-3 mb-8 flex-1">
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2.5">
+                      <Check
+                        size={16}
+                        className="shrink-0 mt-0.5"
+                        style={{ color: "var(--color-brand-400)" }}
+                        aria-hidden
+                      />
+                      <span
+                        style={{
+                          fontFamily: "var(--font-family-body)",
+                          fontSize: "var(--font-size-sm)",
+                          color: "var(--color-neutral-400)",
+                        }}
+                      >
+                        {feature}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
 
-              <motion.button
-                type="button"
-                whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-                onClick={goToAuth}
-                className={`w-full py-3 rounded-2xl cursor-pointer text-sm font-medium ${
-                  plan.recommended ? "btn-tech" : "btn-tech-outline"
-                }`}
-              >
-                {plan.cta}
-              </motion.button>
-            </GlassCard>
+                {/* CTA with confetti burst */}
+                <div className="relative">
+                  <ConfettiBurst trigger={confettiPlan === plan.id} />
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setConfettiPlan(plan.id);
+                      setTimeout(() => setConfettiPlan(null), 900);
+                      goToAuth();
+                    }}
+                    onMouseEnter={() => plan.recommended && setConfettiPlan(plan.id)}
+                    onMouseLeave={() => setConfettiPlan(null)}
+                    className={`w-full py-3 rounded-2xl cursor-pointer text-sm font-medium transition-all duration-300 ${
+                      plan.recommended ? "btn-tech" : "btn-tech-outline"
+                    }`}
+                    style={{
+                      transformOrigin: "center"
+                    }}
+                  >
+                    {plan.cta}
+                  </motion.button>
+                </div>
+              </GlassCard>
+            </motion.div>
           );
         })}
       </motion.div>

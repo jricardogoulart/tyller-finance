@@ -1,133 +1,354 @@
-import { motion, useReducedMotion } from "framer-motion";
+import type { ReactNode } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect } from "react";
 import {
-  BarChart3,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowUpRight,
   Bell,
-  Brain,
+  CircleHelp,
   LineChart,
-  Shield,
+  Sparkles,
   Target,
-  Upload,
-  Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { SectionHeader } from "../SectionHeader";
-import { GlassCard } from "../design-system";
-import { fadeUp, scaleIn, staggerContainer, transition, viewportOnce } from "./motion";
+import {
+  bentoGrid,
+  fadeUp,
+  scaleIn,
+  hoverGlow,
+  pushNotif,
+  shakeVariant,
+  viewportOnce,
+  scrollToSection,
+} from "./motion";
+import { useCountUp } from "./useCountUp";
 
-const FEATURES = [
-  {
-    id: "ai",
-    title: "IA Proativa",
-    description:
-      "Antecipa problemas financeiros e sugere ações antes que você precise se preocupar.",
-    Icon: Brain,
-    span: "lg:col-span-2 lg:row-span-2",
-    featured: true,
-  },
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type FeatureItem = {
+  id: string;
+  order: string;
+  title: string;
+  description: ReactNode;
+  Icon: LucideIcon;
+  iconClass?: string;
+  metric?: string;
+};
+
+// ─── Feature data ─────────────────────────────────────────────────────────────
+
+const FEATURED_BULLETS = [
+  "Detecta cobranças duplicadas em segundos",
+  "Avisa sobre assinaturas esquecidas antes do vencimento",
+] as const;
+
+const FEATURES: FeatureItem[] = [
   {
     id: "upload",
-    title: "Importação Inteligente",
-    description: "Envie extratos e deixe a IA categorizar automaticamente.",
-    Icon: Upload,
-    span: "",
-  },
-  {
-    id: "projections",
-    title: "Projeções Precisas",
-    description: "Veja quanto vai sobrar no fim do mês com modelos preditivos.",
-    Icon: LineChart,
-    span: "",
+    order: "02",
+    title: "Importe seus dados instantaneamente",
+    description: (
+      <>
+        Envie seus extratos via <strong>PDF, OFX ou conexão bancária segura</strong> e deixe nossa IA
+        organizar seus gastos por categoria em poucos segundos.
+      </>
+    ),
+    Icon: ArrowLeftRight,
+    iconClass: "icon-sync",
   },
   {
     id: "alerts",
-    title: "Alertas em Tempo Real",
-    description: "Notificações quando gastos fogem do padrão.",
+    order: "03",
+    title: "Receba alertas em tempo real",
+    description: (
+      <>
+        <strong>Notificações instantâneas</strong> direto no seu WhatsApp ou celular sempre que você
+        gastar mais do que o planejado.
+      </>
+    ),
     Icon: Bell,
-    span: "",
+    iconClass: "icon-bell-animate",
   },
   {
     id: "goals",
-    title: "Metas & Orçamentos",
-    description: "Defina limites por categoria e acompanhe o progresso.",
+    order: "04",
+    title: "Orçamentos inteligentes",
+    description: (
+      <>
+        Crie planejamentos financeiros saudáveis que ajudam você a poupar para o que realmente importa,
+        com acompanhamento imediato.
+      </>
+    ),
     Icon: Target,
-    span: "",
+    metric: "Economize até 20%",
   },
   {
-    id: "insights",
-    title: "Insights Visuais",
-    description: "Gráficos e rankings que revelam padrões ocultos nos seus gastos.",
-    Icon: BarChart3,
-    span: "lg:col-span-2",
-  },
-  {
-    id: "security",
-    title: "Segurança LGPD",
-    description: "Seus dados financeiros protegidos com criptografia e conformidade.",
-    Icon: Shield,
-    span: "",
-  },
-  {
-    id: "speed",
-    title: "Respostas Instantâneas",
-    description: "Análises e relatórios gerados em segundos, não em horas.",
-    Icon: Zap,
-    span: "",
+    id: "projections",
+    order: "05",
+    title: "Preveja seu saldo futuro",
+    description: (
+      <>
+        Veja quanto vai sobrar no fim do mês com <strong>cálculos automáticos baseados no seu histórico</strong>,
+        de forma imediata.
+      </>
+    ),
+    Icon: LineChart,
+    iconClass: "icon-chart-animate",
   },
 ];
 
-export function FeatureBento() {
-  const reducedMotion = useReducedMotion();
+const ICON_STROKE = 2.25;
+
+// ─── Proactive notification with push + shake ─────────────────────────────────
+
+function FeatureNotificationPreview() {
+  const [showNotif, setShowNotif] = useState(false);
+
+  // Auto-toggle notification every 3s for demo
+  useEffect(() => {
+    const id = setTimeout(() => setShowNotif(true), 800);
+    return () => clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    if (!showNotif) return;
+    const id = setTimeout(() => setShowNotif(false), 3200);
+    return () => clearTimeout(id);
+  }, [showNotif]);
 
   return (
-    <section id="features" className="py-20 px-6 md:px-12 max-w-screen-xl mx-auto" aria-labelledby="features-section-title">
-      <div id="features-section-title">
-        <SectionHeader
-        index="01"
-        title="Recursos que transformam suas finanças"
-        description="Tudo que você precisa para ter clareza, controle e convicção sobre seu dinheiro — potencializado por IA."
-      />
+    <div className="relative mt-4 h-[72px]" aria-hidden="true">
+      <AnimatePresence>
+        {showNotif && (
+          <motion.div
+            variants={pushNotif}
+            initial="hidden"
+            animate={["visible", "shake"]}
+            exit={{ opacity: 0, x: 60, transition: { duration: 0.2 } }}
+            className="feature-notification"
+          >
+            <div className="feature-notification__header">
+              <Sparkles size={14} strokeWidth={ICON_STROKE} className="feature-notification__icon" />
+              <span className="feature-notification__label">Tyller IA</span>
+              <span className="feature-notification__time">agora</span>
+            </div>
+            <p className="feature-notification__title">Assinatura duplicada detectada</p>
+            <p className="feature-notification__body">
+              Netflix cobrou 2x este mês — toque para resolver com um clique
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── CountUp card for "projections" feature ───────────────────────────────────
+
+function ProjectionCountCard() {
+  const { val, ref } = useCountUp(2340, 1500);
+
+  return (
+    <div ref={ref} className="mt-3 flex items-baseline gap-1">
+      <span
+        className="font-bold tabular-nums"
+        style={{
+          fontFamily: "var(--font-family-body)",
+          fontSize: "var(--font-size-2xl)",
+          color: "var(--color-brand-400)",
+        }}
+      >
+        +R$ {val.toLocaleString("pt-BR")}
+      </span>
+      <span
+        style={{
+          fontFamily: "var(--font-family-mono)",
+          fontSize: "var(--font-size-2xs)",
+          color: "var(--color-neutral-500)",
+        }}
+      >
+        sobra projetada
+      </span>
+    </div>
+  );
+}
+
+// ─── Feature cards ────────────────────────────────────────────────────────────
+
+function FeatureCard({ feature, index }: { feature: FeatureItem; index: number }) {
+  const { Icon } = feature;
+
+  return (
+    <motion.li
+      variants={fadeUp}
+      className="h-full min-h-[220px]"
+      {...hoverGlow}
+    >
+      <article
+        className="feature-card group h-full"
+        tabIndex={0}
+        role="button"
+        aria-label={`${feature.title}. Saiba mais sobre este recurso.`}
+        onClick={() => scrollToSection("how-it-works")}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            scrollToSection("how-it-works");
+          }
+        }}
+      >
+        <span className="feature-card__number" aria-hidden="true">
+          {feature.order}
+        </span>
+        <ArrowUpRight size={16} strokeWidth={ICON_STROKE} className="feature-card__arrow" aria-hidden="true" />
+
+        <div className={`feature-card__icon-wrap ${feature.iconClass ?? ""}`}>
+          <Icon size={20} strokeWidth={ICON_STROKE} className="feature-card__icon" aria-hidden="true" />
+          <span className="sr-only">{feature.title}</span>
+        </div>
+
+        <h3 className="feature-card__title">{feature.title}</h3>
+        <p className="feature-card__desc">{feature.description}</p>
+
+        {/* CountUp inside projections card */}
+        {feature.id === "projections" && <ProjectionCountCard />}
+        {feature.metric && feature.id !== "projections" && (
+          <p className="feature-card__metric">{feature.metric}</p>
+        )}
+      </article>
+    </motion.li>
+  );
+}
+
+// ─── FeatureBento ─────────────────────────────────────────────────────────────
+
+export function FeatureBento() {
+  return (
+    <section
+      id="features"
+      className="features-section"
+      aria-labelledby="features-section-title"
+      style={{ scrollSnapAlign: "start" }}
+    >
+      <div className="features-section__ambient" aria-hidden="true">
+        <div className="features-section__ambient-glow" />
+        <div className="features-section__grid-bg" />
       </div>
 
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        whileInView="visible"
-        viewport={viewportOnce}
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-fr"
-      >
-        {FEATURES.map((feature, i) => (
-          <GlassCard
-            key={feature.id}
-            className={`p-6 h-full group ${feature.span}`}
-            motionProps={{
-              variants: feature.featured ? scaleIn : fadeUp,
-              transition: transition(0.45, i * 0.05, reducedMotion),
-              whileHover: reducedMotion ? undefined : { y: -4, scale: 1.01 },
+      <div className="features-section__progress-rail" aria-hidden="true" />
+
+      <div className="features-section__container">
+        <div id="features-section-title">
+          <SectionHeader
+            variant="features"
+            index="01"
+            title="A engenharia inteligente que assume o controle das suas finanças"
+            description={
+              <>
+                Ferramentas práticas para automatizar seus gastos, prever o saldo do mês e investir sem
+                dúvidas,{" "}
+                <span className="section-header__highlight">potencializado por IA</span>.
+              </>
+            }
+            socialProof="Recursos validados por mais de 15.000 investidores"
+          />
+        </div>
+
+        {/* Stagger bento grid */}
+        <motion.div
+          variants={bentoGrid}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-80px" }}
+          className="features-bento"
+        >
+          {/* Featured card — IA Proativa */}
+          <motion.article
+            variants={scaleIn}
+            className="feature-card feature-card--featured group"
+            tabIndex={0}
+            role="button"
+            aria-label="IA Proativa. Saiba mais sobre este recurso exclusivo."
+            onClick={() => scrollToSection("how-it-works")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                scrollToSection("how-it-works");
+              }
             }}
+            whileHover={{
+              scale: 1.02,
+              y: -4,
+              boxShadow: "0 0 0 1px #bef030, 0 8px 32px rgba(190,240,48,0.18)",
+            }}
+            whileTap={{ scale: 0.97 }}
           >
-            <div className="flex flex-col h-full gap-4">
-              <div className="ds-icon-tile w-fit">
-                <feature.Icon size={feature.featured ? 22 : 18} aria-hidden />
+            <span className="feature-card__number" aria-hidden="true">01</span>
+            <ArrowUpRight size={16} strokeWidth={ICON_STROKE} className="feature-card__arrow" aria-hidden="true" />
+
+            <span className="feature-card__badge">Exclusivo</span>
+
+            <div className="feature-card__title-row">
+              <div className="feature-card__icon-wrap">
+                <Sparkles size={22} strokeWidth={ICON_STROKE} className="feature-card__icon" aria-hidden="true" />
               </div>
-              <div>
-                <h3
-                  className="ds-card-title mb-2"
-                  style={{ fontSize: feature.featured ? "var(--font-size-xl)" : undefined }}
-                >
-                  {feature.title}
-                </h3>
-                <p className="ds-card-subtitle" style={{ lineHeight: "var(--line-height-relaxed)" }}>
-                  {feature.description}
-                </p>
-              </div>
-              {feature.featured && (
-                <div className="mt-auto pt-4 border-t border-neutral-800">
-                  <span className="ds-badge ds-badge-brand">Destaque</span>
-                </div>
-              )}
+              <button
+                type="button"
+                className="feature-card__help"
+                aria-label="O que é IA Proativa? A IA avisa se uma assinatura subir de preço ou se detectar cobranças duplicadas."
+                title="Exemplo: a IA avisa se uma assinatura subir de preço ou se detectar cobranças duplicadas."
+                onClick={(e) => e.stopPropagation()}
+              >
+                <CircleHelp size={16} strokeWidth={ICON_STROKE} aria-hidden="true" />
+              </button>
             </div>
-          </GlassCard>
-        ))}
-      </motion.div>
+
+            <h3 className="feature-card__title feature-card__title--featured">IA Proativa</h3>
+            <p className="feature-card__desc">
+              Proteja seu fluxo de caixa e receba rotas de melhoria: nossa inteligência avisa sobre{" "}
+              <strong>cobranças duplicadas ou assinaturas esquecidas</strong> antes do vencimento.
+            </p>
+
+            <ul className="feature-checklist">
+              {FEATURED_BULLETS.map((item) => (
+                <li key={item}>
+                  <span className="feature-checklist__mark" aria-hidden="true">✓</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+
+            {/* Push notification with shake */}
+            <FeatureNotificationPreview />
+          </motion.article>
+
+          {/* Staggered feature grid */}
+          <ul className="features-grid" aria-label="Recursos da plataforma">
+            {FEATURES.map((feature, i) => (
+              <FeatureCard key={feature.id} feature={feature} index={i} />
+            ))}
+          </ul>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={viewportOnce}
+          transition={{ duration: 0.4, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          className="features-section__cta-wrap"
+        >
+          <button
+            type="button"
+            className="features-cta"
+            onClick={() => scrollToSection("how-it-works")}
+          >
+            Conhecer todos os recursos da plataforma
+            <ArrowRight size={16} strokeWidth={ICON_STROKE} aria-hidden="true" />
+          </button>
+        </motion.div>
+      </div>
     </section>
   );
 }
